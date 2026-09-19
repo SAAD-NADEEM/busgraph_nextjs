@@ -37,13 +37,48 @@ export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
     <>
       {routes.map((route, i) => {
         const color = ROUTE_COLORS[i % ROUTE_COLORS.length];
-        const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
-          type: "Feature" as const,
-          properties: {},
-          geometry: {
-            type: "LineString" as const,
-            coordinates: route.coordinates,
+        const startCoord = route.coordinates[0];
+        const endCoord = route.coordinates[route.coordinates.length - 1];
+
+        const features: GeoJSON.Feature[] = [
+          {
+            type: "Feature",
+            properties: { kind: "line" },
+            geometry: {
+              type: "LineString",
+              coordinates: route.coordinates,
+            },
           },
+        ];
+
+        if (startCoord) {
+          features.push({
+            type: "Feature",
+            properties: { kind: "endpoint" },
+            geometry: {
+              type: "Point",
+              coordinates: startCoord,
+            },
+          });
+        }
+
+        if (
+          endCoord &&
+          (endCoord[0] !== startCoord?.[0] || endCoord[1] !== startCoord?.[1])
+        ) {
+          features.push({
+            type: "Feature",
+            properties: { kind: "endpoint" },
+            geometry: {
+              type: "Point",
+              coordinates: endCoord,
+            },
+          });
+        }
+
+        const geojson: GeoJSON.FeatureCollection = {
+          type: "FeatureCollection",
+          features,
         };
 
         return (
@@ -57,6 +92,7 @@ export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
             <Layer
               id={`all-route-casing-${route.routeId}-${i}`}
               type="line"
+              filter={["==", ["get", "kind"], "line"]}
               layout={{ "line-join": "round", "line-cap": "round" }}
               paint={{
                 "line-color": "#ffffff",
@@ -68,11 +104,25 @@ export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
             <Layer
               id={`all-route-line-${route.routeId}-${i}`}
               type="line"
+              filter={["==", ["get", "kind"], "line"]}
               layout={{ "line-join": "round", "line-cap": "round" }}
               paint={{
                 "line-color": color,
                 "line-width": 4,
                 "line-opacity": 0.85,
+              }}
+            />
+            {/* Terminal circle at each end of the route */}
+            <Layer
+              id={`all-route-endpoints-${route.routeId}-${i}`}
+              type="circle"
+              filter={["==", ["get", "kind"], "endpoint"]}
+              paint={{
+                "circle-radius": 6,
+                "circle-color": color,
+                "circle-stroke-width": 2.5,
+                "circle-stroke-color": "#ffffff",
+                "circle-opacity": 1,
               }}
             />
           </Source>

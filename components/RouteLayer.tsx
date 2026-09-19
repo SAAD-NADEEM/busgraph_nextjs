@@ -2,13 +2,48 @@
 import { Source, Layer } from "react-map-gl/mapbox";
 
 export default function RouteLayer({ coordinates }: { coordinates: [number, number][] }) {
-  const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
-    type: "Feature" as const,
-    properties: {},
-    geometry: {
-      type: "LineString" as const,
-      coordinates,
+  const startCoord = coordinates[0];
+  const endCoord = coordinates[coordinates.length - 1];
+
+  const features: GeoJSON.Feature[] = [
+    {
+      type: "Feature",
+      properties: { kind: "line" },
+      geometry: {
+        type: "LineString",
+        coordinates,
+      },
     },
+  ];
+
+  if (startCoord) {
+    features.push({
+      type: "Feature",
+      properties: { kind: "endpoint" },
+      geometry: {
+        type: "Point",
+        coordinates: startCoord,
+      },
+    });
+  }
+
+  if (
+    endCoord &&
+    (endCoord[0] !== startCoord?.[0] || endCoord[1] !== startCoord?.[1])
+  ) {
+    features.push({
+      type: "Feature",
+      properties: { kind: "endpoint" },
+      geometry: {
+        type: "Point",
+        coordinates: endCoord,
+      },
+    });
+  }
+
+  const geojson: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features,
   };
 
   return (
@@ -17,6 +52,7 @@ export default function RouteLayer({ coordinates }: { coordinates: [number, numb
       <Layer
         id="route-casing"
         type="line"
+        filter={["==", ["get", "kind"], "line"]}
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
           "line-color": "#ffffff",
@@ -28,11 +64,25 @@ export default function RouteLayer({ coordinates }: { coordinates: [number, numb
       <Layer
         id="route-line"
         type="line"
+        filter={["==", ["get", "kind"], "line"]}
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
           "line-color": "#1a73e8",
           "line-width": 6,
           "line-opacity": 1,
+        }}
+      />
+      {/* Terminal circles at each end */}
+      <Layer
+        id="route-endpoints"
+        type="circle"
+        filter={["==", ["get", "kind"], "endpoint"]}
+        paint={{
+          "circle-radius": 7,
+          "circle-color": "#1a73e8",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+          "circle-opacity": 1,
         }}
       />
     </Source>
