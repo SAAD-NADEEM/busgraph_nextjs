@@ -84,7 +84,9 @@ export async function loadAllRoutes(): Promise<ParsedRoute[]> {
 
   const dataDir = join(process.cwd(), "data");
   const files = await readdir(dataDir);
-  const kmlFiles = files.filter((f) => f.endsWith(".kml"));
+  const kmlFiles = files.filter(
+    (f) => f.endsWith(".kml") && !f.toLowerCase().startsWith("test"),
+  );
 
   const routes: ParsedRoute[] = [];
 

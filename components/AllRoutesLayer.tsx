@@ -1,22 +1,6 @@
 "use client";
 import { Source, Layer } from "react-map-gl/mapbox";
-
-/**
- * Distinct, visually separated color palette for bus routes.
- * Cycles if there are more routes than colors.
- */
-const ROUTE_COLORS = [
-  "#E53935", // red
-  "#1E88E5", // blue
-  "#43A047", // green
-  "#FB8C00", // orange
-  "#8E24AA", // purple
-  "#00ACC1", // teal
-  "#D81B60", // pink
-  "#6D4C41", // brown
-  "#3949AB", // indigo
-  "#C0CA33", // lime
-];
+import { getRouteColor } from "@/lib/routeColors";
 
 export interface RouteData {
   routeId: string;
@@ -30,13 +14,13 @@ interface AllRoutesLayerProps {
 }
 
 /**
- * Renders all bus route polylines on the map, each with a distinct color.
+ * Renders all bus route polylines on the map with their official company colors.
  */
 export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
   return (
     <>
       {routes.map((route, i) => {
-        const color = ROUTE_COLORS[i % ROUTE_COLORS.length];
+        const color = getRouteColor(route.routeId);
         const startCoord = route.coordinates[0];
         const endCoord = route.coordinates[route.coordinates.length - 1];
 

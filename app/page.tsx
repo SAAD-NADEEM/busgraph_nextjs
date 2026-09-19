@@ -6,6 +6,7 @@ import WalkingLayer from "@/components/WalkingLayer";
 import SnapMarkers from "@/components/SnapMarkers";
 import SearchInput from "@/components/SearchInput";
 import AllRoutesLayer, { RouteData } from "@/components/AllRoutesLayer";
+import { getRouteColor } from "@/lib/routeColors";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 /** Shape returned by POST /api/find-route */
@@ -126,8 +127,13 @@ export default function HomePage() {
           <AllRoutesLayer routes={allRoutes} />
         )}
 
-        {/* Bus route polyline (solid blue with white casing) */}
-        {routeMatch && <RouteLayer coordinates={routeMatch.busPath} />}
+        {/* Bus route polyline (with official company color) */}
+        {routeMatch && (
+          <RouteLayer
+            coordinates={routeMatch.busPath}
+            color={getRouteColor(routeMatch.routeId)}
+          />
+        )}
 
         {/* Walking: user origin → boarding point (dashed gray) */}
         {routeMatch && (
@@ -249,7 +255,13 @@ export default function HomePage() {
               lineHeight: "1.5",
             }}
           >
-            <div style={{ fontWeight: 600, color: "#1a73e8", marginBottom: 4 }}>
+            <div
+              style={{
+                fontWeight: 600,
+                color: getRouteColor(routeMatch.routeId),
+                marginBottom: 4,
+              }}
+            >
               🚌 {routeMatch.routeId} — {routeMatch.routeName.match(/\((.+)\)/)?.[1] || routeMatch.routeName}
             </div>
             <div style={{ color: "#555" }}>

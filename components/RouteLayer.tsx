@@ -1,7 +1,13 @@
 "use client";
 import { Source, Layer } from "react-map-gl/mapbox";
 
-export default function RouteLayer({ coordinates }: { coordinates: [number, number][] }) {
+export default function RouteLayer({
+  coordinates,
+  color = "#1a73e8",
+}: {
+  coordinates: [number, number][];
+  color?: string;
+}) {
   const startCoord = coordinates[0];
   const endCoord = coordinates[coordinates.length - 1];
 
@@ -60,14 +66,14 @@ export default function RouteLayer({ coordinates }: { coordinates: [number, numb
           "line-opacity": 1,
         }}
       />
-      {/* Blue line on top */}
+      {/* Colored route line on top */}
       <Layer
         id="route-line"
         type="line"
         filter={["==", ["get", "kind"], "line"]}
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
-          "line-color": "#1a73e8",
+          "line-color": color,
           "line-width": 6,
           "line-opacity": 1,
         }}
@@ -79,7 +85,7 @@ export default function RouteLayer({ coordinates }: { coordinates: [number, numb
         filter={["==", ["get", "kind"], "endpoint"]}
         paint={{
           "circle-radius": 7,
-          "circle-color": "#1a73e8",
+          "circle-color": color,
           "circle-stroke-width": 3,
           "circle-stroke-color": "#ffffff",
           "circle-opacity": 1,
