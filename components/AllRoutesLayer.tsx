@@ -48,14 +48,14 @@ export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
 
         return (
           <Source
-            key={route.routeId}
-            id={`all-route-${route.routeId}`}
+            key={`${route.routeId}-${i}`}
+            id={`all-route-${route.routeId}-${i}`}
             type="geojson"
             data={geojson}
           >
             {/* White casing for contrast */}
             <Layer
-              id={`all-route-casing-${route.routeId}`}
+              id={`all-route-casing-${route.routeId}-${i}`}
               type="line"
               layout={{ "line-join": "round", "line-cap": "round" }}
               paint={{
@@ -66,7 +66,7 @@ export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
             />
             {/* Colored route line */}
             <Layer
-              id={`all-route-line-${route.routeId}`}
+              id={`all-route-line-${route.routeId}-${i}`}
               type="line"
               layout={{ "line-join": "round", "line-cap": "round" }}
               paint={{

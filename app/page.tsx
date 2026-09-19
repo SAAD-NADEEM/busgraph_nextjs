@@ -5,6 +5,7 @@ import RouteLayer from "@/components/RouteLayer";
 import WalkingLayer from "@/components/WalkingLayer";
 import SnapMarkers from "@/components/SnapMarkers";
 import SearchInput from "@/components/SearchInput";
+import AllRoutesLayer, { RouteData } from "@/components/AllRoutesLayer";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 /** Shape returned by POST /api/find-route */
@@ -26,9 +27,30 @@ export default function HomePage() {
   );
   const [destCoords, setDestCoords] = useState<[number, number] | null>(null);
   const [routeMatch, setRouteMatch] = useState<RouteMatch | null>(null);
+  const [showAllRoutes, setShowAllRoutes] = useState(false);
+  const [allRoutes, setAllRoutes] = useState<RouteData[]>([]);
+  const [loadingRoutes, setLoadingRoutes] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const mapRef = useRef<any>(null);
+
+  const handleToggleAllRoutes = async (checked: boolean) => {
+    setShowAllRoutes(checked);
+    if (checked && allRoutes.length === 0) {
+      setLoadingRoutes(true);
+      try {
+        const res = await fetch("/api/all-routes");
+        if (res.ok) {
+          const data = await res.json();
+          setAllRoutes(data);
+        }
+      } catch (err) {
+        console.error("Failed to load all routes:", err);
+      } finally {
+        setLoadingRoutes(false);
+      }
+    }
+  };
 
   const handleSubmit = async () => {
     if (!originCoords || !destCoords) {
@@ -57,6 +79,8 @@ export default function HomePage() {
 
       const match: RouteMatch = await res.json();
       setRouteMatch(match);
+      // Automatically uncheck "Show all routes" when route is found
+      setShowAllRoutes(false);
 
       // Fit the map to include the full bus path + walking endpoints
       const allLngs = [
@@ -96,6 +120,11 @@ export default function HomePage() {
         mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
       >
         <NavigationControl position="bottom-right" />
+
+        {/* All bus routes layer (each with its distinct color) */}
+        {showAllRoutes && allRoutes.length > 0 && (
+          <AllRoutesLayer routes={allRoutes} />
+        )}
 
         {/* Bus route polyline (solid blue with white casing) */}
         {routeMatch && <RouteLayer coordinates={routeMatch.busPath} />}
@@ -155,6 +184,40 @@ export default function HomePage() {
           placeholder="Destination"
           onSelect={(_, coords) => setDestCoords(coords)}
         />
+
+        {/* Checkbox to toggle all bus routes */}
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: 500,
+            color: "#374151",
+            userSelect: "none",
+            padding: "2px 0",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showAllRoutes}
+            onChange={(e) => handleToggleAllRoutes(e.target.checked)}
+            style={{
+              width: "16px",
+              height: "16px",
+              cursor: "pointer",
+              accentColor: "#1a73e8",
+            }}
+          />
+          <span>Show all bus routes</span>
+          {loadingRoutes && (
+            <span style={{ fontSize: "11px", color: "#6b7280" }}>
+              (loading...)
+            </span>
+          )}
+        </label>
+
         <button
           onClick={handleSubmit}
           disabled={loading}

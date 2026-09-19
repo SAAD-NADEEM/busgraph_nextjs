@@ -14,7 +14,7 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
   >([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionRef = useRef(false);
 
   useEffect(() => {

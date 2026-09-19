@@ -33,19 +33,19 @@ let cachedRoutes: ParsedRoute[] | null = null;
 export function parseKml(kmlContent: string, filename: string): ParsedRoute {
   // Extract <Placemark><name>
   const nameMatch = kmlContent.match(
-    /<Placemark>\s*<name>(.*?)<\/name>/s,
+    /<Placemark>\s*<name>([\s\S]*?)<\/name>/,
   );
   const name = nameMatch?.[1]?.trim() ?? filename;
 
   // Extract <Data name="Route"><value>
   const routeIdMatch = kmlContent.match(
-    /<Data name="Route">\s*<value>(.*?)<\/value>/s,
+    /<Data name="Route">\s*<value>([\s\S]*?)<\/value>/,
   );
   const routeId = routeIdMatch?.[1]?.trim() || filename.replace(".kml", "");
 
   // Extract <Data name="Direction"><value>
   const directionMatch = kmlContent.match(
-    /<Data name="Direction">\s*<value>(.*?)<\/value>/s,
+    /<Data name="Direction">\s*<value>([\s\S]*?)<\/value>/,
   );
   const direction = directionMatch?.[1]?.trim() || `${routeId}_UP`;
 
@@ -89,8 +89,12 @@ export async function loadAllRoutes(): Promise<ParsedRoute[]> {
   const routes: ParsedRoute[] = [];
 
   for (const file of kmlFiles) {
-    const content = await readFile(join(dataDir, file), "utf-8");
-    routes.push(parseKml(content, file));
+    try {
+      const content = await readFile(join(dataDir, file), "utf-8");
+      routes.push(parseKml(content, file));
+    } catch (err) {
+      console.warn(`[kmlParser] Skipping ${file} due to parse error:`, err);
+    }
   }
 
   cachedRoutes = routes;
