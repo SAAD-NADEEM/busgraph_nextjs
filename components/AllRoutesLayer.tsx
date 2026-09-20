@@ -11,15 +11,21 @@ export interface RouteData {
 
 interface AllRoutesLayerProps {
   routes: RouteData[];
+  /** Set of routeId strings to render. If omitted, all routes are shown. */
+  visibleRouteIds?: Set<string>;
 }
 
 /**
- * Renders all bus route polylines on the map with their official company colors.
+ * Renders bus route polylines on the map with their official company colors.
+ * Only routes whose routeId is in `visibleRouteIds` are rendered (if provided).
  */
-export default function AllRoutesLayer({ routes }: AllRoutesLayerProps) {
+export default function AllRoutesLayer({ routes, visibleRouteIds }: AllRoutesLayerProps) {
+  const visible = visibleRouteIds
+    ? routes.filter((r) => visibleRouteIds.has(r.routeId))
+    : routes;
   return (
     <>
-      {routes.map((route, i) => {
+      {visible.map((route, i) => {
         const color = getRouteColor(route.routeId);
         const startCoord = route.coordinates[0];
         const endCoord = route.coordinates[route.coordinates.length - 1];

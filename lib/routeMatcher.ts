@@ -7,8 +7,9 @@
  */
 
 import type { LatLng, SnapResult } from "./haversine";
-import { snapToRoute } from "./haversine";
+import { snapToRoute, snapToRouteAfter } from "./haversine";
 import { loadAllRoutes } from "./kmlParser";
+
 
 export interface RouteMatch {
   /** Route identifier, e.g. "R3" */
@@ -56,36 +57,51 @@ export async function findBestRoute(
   const candidates: RouteMatch[] = [];
 
   for (const route of allRoutes) {
-    const startNode = snapToRoute(origin, route.coordinates);
-    const endNode = snapToRoute(destination, route.coordinates);
+    // Test both the stored direction (UP) and its reverse (implied DOWN).
+    // Each KML only contains one direction, so reversing gives us the return trip.
+    const variants = [
+      { coordinates: route.coordinates, direction: route.direction },
+      {
+        coordinates: [...route.coordinates].reverse(),
+        direction: route.direction.replace(/_UP$/, "_DOWN").replace(/_DOWN$/, "_UP"),
+      },
+    ];
 
-    // Direction validation: bus must travel forward in the coordinate array
-    if (endNode.index <= startNode.index) continue;
+    for (const variant of variants) {
+      // Snap origin to nearest point on this variant
+      const startNode = snapToRoute(origin, variant.coordinates);
 
-    // Reject if either snap point is too far from the route
-    if (
-      startNode.distance > MAX_SNAP_DISTANCE_M ||
-      endNode.distance > MAX_SNAP_DISTANCE_M
-    ) {
-      continue;
+      // No room to travel forward — skip
+      if (startNode.index >= variant.coordinates.length - 1) continue;
+
+      // Snap destination to nearest point strictly AFTER the boarding index
+      const endNode = snapToRouteAfter(destination, variant.coordinates, startNode.index);
+
+      // Reject if either snap point is too far from the route
+      if (
+        startNode.distance > MAX_SNAP_DISTANCE_M ||
+        endNode.distance > MAX_SNAP_DISTANCE_M
+      ) {
+        continue;
+      }
+
+      // Extract the bus path segment (inclusive), converting to [lng, lat] for Mapbox
+      const busPath: [number, number][] = variant.coordinates
+        .slice(startNode.index, endNode.index + 1)
+        .map((coord) => [coord.lng, coord.lat]);
+
+      candidates.push({
+        routeId: route.routeId,
+        routeName: route.name,
+        direction: variant.direction,
+        startNode,
+        endNode,
+        busPath,
+        walkToStart: { from: origin, to: startNode.point },
+        walkFromEnd: { from: endNode.point, to: destination },
+        totalSnapDistance: startNode.distance + endNode.distance,
+      });
     }
-
-    // Extract the bus path segment (inclusive), converting to [lng, lat] for Mapbox
-    const busPath: [number, number][] = route.coordinates
-      .slice(startNode.index, endNode.index + 1)
-      .map((coord) => [coord.lng, coord.lat]);
-
-    candidates.push({
-      routeId: route.routeId,
-      routeName: route.name,
-      direction: route.direction,
-      startNode,
-      endNode,
-      busPath,
-      walkToStart: { from: origin, to: startNode.point },
-      walkFromEnd: { from: endNode.point, to: destination },
-      totalSnapDistance: startNode.distance + endNode.distance,
-    });
   }
 
   if (candidates.length === 0) return null;
@@ -94,3 +110,4 @@ export async function findBestRoute(
   candidates.sort((a, b) => a.totalSnapDistance - b.totalSnapDistance);
   return candidates[0];
 }
+

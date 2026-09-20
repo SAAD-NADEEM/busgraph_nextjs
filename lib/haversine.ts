@@ -68,3 +68,34 @@ export function snapToRoute(userLocation: LatLng, routeCoords: LatLng[]): SnapRe
     distance: bestDistance,
   };
 }
+
+/**
+ * Snap a user location to the nearest coordinate in a route array,
+ * only considering indices strictly after `minIndex`.
+ *
+ * Used to snap the destination after the boarding point is already known,
+ * so direction validation always passes on shared road segments where the
+ * global nearest point on the route might be behind the boarding index.
+ */
+export function snapToRouteAfter(
+  userLocation: LatLng,
+  routeCoords: LatLng[],
+  minIndex: number,
+): SnapResult {
+  let bestIndex = minIndex + 1;
+  let bestDistance = Infinity;
+
+  for (let i = minIndex + 1; i < routeCoords.length; i++) {
+    const d = haversineDistance(userLocation, routeCoords[i]);
+    if (d < bestDistance) {
+      bestDistance = d;
+      bestIndex = i;
+    }
+  }
+
+  return {
+    point: routeCoords[bestIndex],
+    index: bestIndex,
+    distance: bestDistance,
+  };
+}

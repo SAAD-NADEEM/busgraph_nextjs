@@ -4,26 +4,29 @@ import { Source, Layer } from "react-map-gl/mapbox";
 interface WalkingLayerProps {
   /** Unique ID suffix to avoid Mapbox source/layer collisions */
   id: string;
-  /** Start point of the walking segment */
-  from: { lat: number; lng: number };
-  /** End point of the walking segment */
-  to: { lat: number; lng: number };
+  /**
+   * Ordered [lng, lat] coordinates of the walking path.
+   * Obtained from the Mapbox Directions walking API.
+   * Falls back gracefully to a two-point straight line if only
+   * start/end coords are supplied.
+   */
+  coordinates: [number, number][];
 }
 
 /**
- * Renders a dashed polyline between two points to represent
- * a pedestrian walking segment on the map.
+ * Renders a dashed polyline representing a pedestrian walking segment.
+ * Coordinates should come from the Mapbox Directions API (walking profile)
+ * so the line follows actual roads and footpaths.
  */
-export default function WalkingLayer({ id, from, to }: WalkingLayerProps) {
+export default function WalkingLayer({ id, coordinates }: WalkingLayerProps) {
+  if (coordinates.length < 2) return null;
+
   const geojson: GeoJSON.Feature<GeoJSON.LineString> = {
     type: "Feature" as const,
     properties: {},
     geometry: {
       type: "LineString" as const,
-      coordinates: [
-        [from.lng, from.lat],
-        [to.lng, to.lat],
-      ],
+      coordinates,
     },
   };
 
