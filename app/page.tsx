@@ -28,9 +28,12 @@ export default function HomePage() {
   const [originCoords, setOriginCoords] = useState<[number, number] | null>(null);
   const [destCoords, setDestCoords] = useState<[number, number] | null>(null);
   const [routeMatch, setRouteMatch] = useState<RouteMatch | null>(null);
-  // Routed walking path coordinates from Mapbox Directions API
+
+  // Routed walking path coordinates and route stats (distance in meters, duration in seconds)
   const [walkToStartCoords, setWalkToStartCoords] = useState<[number, number][]>([]);
   const [walkFromEndCoords, setWalkFromEndCoords] = useState<[number, number][]>([]);
+  const [walkToStartInfo, setWalkToStartInfo] = useState<{ distance: number; duration: number } | null>(null);
+  const [walkFromEndInfo, setWalkFromEndInfo] = useState<{ distance: number; duration: number } | null>(null);
 
   // Legend sheet state
   const [legendOpen, setLegendOpen] = useState(false);
@@ -82,6 +85,8 @@ export default function HomePage() {
     setRouteMatch(null);
     setWalkToStartCoords([]);
     setWalkFromEndCoords([]);
+    setWalkToStartInfo(null);
+    setWalkFromEndInfo(null);
     setError("");
     setSearchKey((k) => k + 1); // clears SearchInput text
     mapRef.current?.flyTo({ center: [67.0011, 24.8607], zoom: 12, duration: 800 });
@@ -97,6 +102,8 @@ export default function HomePage() {
     setRouteMatch(null);
     setWalkToStartCoords([]);
     setWalkFromEndCoords([]);
+    setWalkToStartInfo(null);
+    setWalkFromEndInfo(null);
 
     try {
       // originCoords from Nominatim/SearchInput are [lng, lat]
@@ -119,12 +126,14 @@ export default function HomePage() {
 
       // Fetch walking routes from Mapbox Directions API in parallel
       const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-      const [toStartCoords, fromEndCoords] = await Promise.all([
+      const [toStartResult, fromEndResult] = await Promise.all([
         getWalkingRoute(match.walkToStart.from, match.walkToStart.to, token),
         getWalkingRoute(match.walkFromEnd.from, match.walkFromEnd.to, token),
       ]);
-      setWalkToStartCoords(toStartCoords);
-      setWalkFromEndCoords(fromEndCoords);
+      setWalkToStartCoords(toStartResult.coordinates);
+      setWalkFromEndCoords(fromEndResult.coordinates);
+      setWalkToStartInfo({ distance: toStartResult.distance, duration: toStartResult.duration });
+      setWalkFromEndInfo({ distance: fromEndResult.distance, duration: fromEndResult.duration });
 
       // Fit the map to include the full bus path + walking endpoints
       const allLngs = [
@@ -267,11 +276,13 @@ export default function HomePage() {
           key={`origin-${searchKey}`}
           placeholder="Starting point"
           onSelect={(_, coords) => setOriginCoords(coords)}
+          onClear={() => setOriginCoords(null)}
         />
         <SearchInput
           key={`dest-${searchKey}`}
           placeholder="Destination"
           onSelect={(_, coords) => setDestCoords(coords)}
+          onClear={() => setDestCoords(null)}
         />
 
         <button
@@ -332,7 +343,25 @@ export default function HomePage() {
               Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
             busDistM += 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           }
-          const fmt = (m: number) => `${(m / 1000).toFixed(2)}km`;
+
+          const fmtDist = (m: number) =>
+            m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(2)}km`;
+
+          const fmtWalk = (distM: number, durationSec?: number) => {
+            const mins = Math.max(1, Math.round((durationSec ?? (distM / 1.33)) / 60));
+            return `~${mins} min${mins === 1 ? "" : "s"} (${fmtDist(distM)})`;
+          };
+
+          const toStartDist = walkToStartInfo?.distance ?? routeMatch.startNode.distance;
+          const toStartDuration = walkToStartInfo?.duration;
+
+          const fromEndDist = walkFromEndInfo?.distance ?? routeMatch.endNode.distance;
+          const fromEndDuration = walkFromEndInfo?.duration;
+
+          const totalWalkDist = toStartDist + fromEndDist;
+          const totalWalkDuration =
+            (toStartDuration ?? (toStartDist / 1.33)) +
+            (fromEndDuration ?? (fromEndDist / 1.33));
 
           const routeLabel =
             routeMatch.routeName.match(/\((.+)\)/)?.[1] ||
@@ -343,16 +372,17 @@ export default function HomePage() {
             <div
               style={{
                 marginTop: "4px",
-                padding: "10px 12px",
+                padding: "12px 14px",
                 background: "#f0f7ff",
-                borderRadius: "8px",
+                borderRadius: "10px",
                 fontSize: "13px",
-                lineHeight: "1.8",
+                lineHeight: "1.7",
+                border: "1px solid #d0e3ff",
               }}
             >
               {/* Walk to boarding point */}
-              <div style={{ color: "#555" }}>
-                🚶 Walk {fmt(routeMatch.startNode.distance)} to board
+              <div style={{ color: "#374151" }}>
+                🚶 Walk <strong>{fmtWalk(toStartDist, toStartDuration)}</strong> to board
               </div>
 
               {/* Bus segment */}
@@ -362,20 +392,38 @@ export default function HomePage() {
                   color: routeColor,
                   borderLeft: `3px solid ${routeColor}`,
                   paddingLeft: "8px",
-                  margin: "4px 0",
+                  margin: "6px 0",
                 }}
               >
                 🚌 {routeMatch.routeId} — {routeLabel}
                 <span
                   style={{ fontWeight: 400, color: "#666", marginLeft: "6px" }}
                 >
-                  ({fmt(busDistM)})
+                  ({fmtDist(busDistM)})
                 </span>
               </div>
 
               {/* Walk to destination */}
-              <div style={{ color: "#555" }}>
-                🚶 Walk {fmt(routeMatch.endNode.distance)} to destination
+              <div style={{ color: "#374151" }}>
+                🚶 Walk <strong>{fmtWalk(fromEndDist, fromEndDuration)}</strong> to destination
+              </div>
+
+              {/* Total walking summary pill */}
+              <div
+                style={{
+                  marginTop: "8px",
+                  paddingTop: "6px",
+                  borderTop: "1px dashed #c3dafe",
+                  fontSize: "11px",
+                  color: "#6b7280",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>Total walking:</span>
+                <span style={{ fontWeight: 600, color: "#1f2937" }}>
+                  {fmtWalk(totalWalkDist, totalWalkDuration)}
+                </span>
               </div>
             </div>
           );

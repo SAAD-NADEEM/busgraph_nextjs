@@ -1,17 +1,16 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { getAutocomplete } from "@/utils/autocomplete";
+import { getAutocomplete, AutocompleteResult } from "@/utils/autocomplete";
 
 interface Props {
   placeholder: string;
   onSelect: (label: string, coords: [number, number]) => void;
+  onClear?: () => void;
 }
 
-export default function SearchInput({ placeholder, onSelect }: Props) {
+export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<
-    { label: string; coords: [number, number] }[]
-  >([]);
+  const [suggestions, setSuggestions] = useState<AutocompleteResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -39,14 +38,22 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
         setOpen(true);
         setLoading(false);
       }
-    }, 400); // slightly longer debounce
+    }, 350);
   }, [query]);
 
-  const handleSelect = (item: { label: string; coords: [number, number] }) => {
+  const handleSelect = (item: AutocompleteResult) => {
     selectionRef.current = true;
-    setQuery(item.label);
+    const chosenName = item.name || item.label;
+    setQuery(chosenName);
     setOpen(false);
-    onSelect(item.label, item.coords);
+    onSelect(chosenName, item.coords);
+  };
+
+  const handleClear = () => {
+    setQuery("");
+    setSuggestions([]);
+    setOpen(false);
+    onClear?.();
   };
 
   return (
@@ -54,30 +61,60 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => query.length >= 2 && setOpen(true)}
+        onFocus={() => query.length >= 2 && suggestions.length > 0 && setOpen(true)}
         placeholder={placeholder}
         style={{
           width: "100%",
-          padding: "10px",
+          padding: "10px 32px 10px 10px",
           borderRadius: "8px",
           border: "1px solid #ddd",
           boxSizing: "border-box",
           fontSize: "14px",
+          outline: "none",
         }}
       />
+
       {loading && (
         <div
           style={{
             position: "absolute",
             right: "10px",
-            top: "10px",
-            fontSize: "12px",
-            color: "#666",
+            top: "50%",
+            transform: "translateY(-50%)",
+            fontSize: "11px",
+            color: "#888",
           }}
         >
           Searching...
         </div>
       )}
+
+      {!loading && query.length > 0 && (
+        <button
+          type="button"
+          onClick={handleClear}
+          style={{
+            position: "absolute",
+            right: "8px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            background: "none",
+            border: "none",
+            color: "#999",
+            cursor: "pointer",
+            fontSize: "14px",
+            padding: "2px 6px",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          title="Clear"
+        >
+          ✕
+        </button>
+      )}
+
       {open && (
         <ul
           style={{
@@ -93,7 +130,7 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
             padding: 0,
             zIndex: 1000,
             boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            maxHeight: "200px",
+            maxHeight: "220px",
             overflowY: "auto",
           }}
         >
@@ -103,10 +140,13 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
                   key={i}
                   onClick={() => handleSelect(item)}
                   style={{
-                    padding: "10px 12px",
+                    padding: "8px 12px",
                     cursor: "pointer",
-                    fontSize: "13px",
                     borderBottom: "1px solid #f0f0f0",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "2px",
+                    textAlign: "left",
                   }}
                   onMouseEnter={(e) =>
                     (e.currentTarget.style.background = "#f5f5f5")
@@ -115,7 +155,28 @@ export default function SearchInput({ placeholder, onSelect }: Props) {
                     (e.currentTarget.style.background = "white")
                   }
                 >
-                  {item.label}
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      color: "#1f2937",
+                    }}
+                  >
+                    {item.name || item.label}
+                  </div>
+                  {item.subtitle && (
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#6b7280",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {item.subtitle}
+                    </div>
+                  )}
                 </li>
               ))
             : !loading && (

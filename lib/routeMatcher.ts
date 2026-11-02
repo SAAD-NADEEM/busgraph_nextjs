@@ -35,8 +35,12 @@ export interface RouteMatch {
   totalSnapDistance: number;
 }
 
-/** Maximum snap distance in meters — routes further than this are rejected */
-const MAX_SNAP_DISTANCE_M = 2_000;
+/**
+ * Maximum snap distance in meters.
+ * Set to 25,000m (25 km) to allow very large walking/boarding radiuses (3-5+ km)
+ * across the Karachi metropolitan region.
+ */
+const MAX_SNAP_DISTANCE_M = 25_000;
 
 /**
  * Find the best bus route for the given origin and destination.
@@ -110,4 +114,3 @@ export async function findBestRoute(
   candidates.sort((a, b) => a.totalSnapDistance - b.totalSnapDistance);
   return candidates[0];
 }
-
