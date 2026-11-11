@@ -37,10 +37,10 @@ export default function WalkingLayer({ id, coordinates }: WalkingLayerProps) {
         type="line"
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
-          "line-color": "#6B7280",
+          "line-color": "#38bdf8",
           "line-width": 4,
           "line-dasharray": [2, 2],
-          "line-opacity": 0.8,
+          "line-opacity": 0.95,
         }}
       />
     </Source>

@@ -1,23 +1,16 @@
 /**
  * POST /api/find-route
  *
- * Accepts origin and destination coordinates, runs the KML-based
- * route matching engine, and returns the best bus route match.
- *
- * Request body:
- * {
- *   "origin": { "lat": number, "lng": number },
- *   "destination": { "lat": number, "lng": number }
- * }
+ * Accepts origin and destination coordinates, runs the multi-option and
+ * multi-bus transfer engine, and returns both the ranked options and the top match.
  */
 
 import { NextRequest } from "next/server";
-import { findBestRoute } from "@/lib/routeMatcher";
+import { findRouteOptions } from "@/lib/routeMatcher";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-
     const { origin, destination } = body;
 
     // Validate input
@@ -31,25 +24,28 @@ export async function POST(request: NextRequest) {
     ) {
       return Response.json(
         { error: "Invalid request. Provide origin and destination with lat/lng." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
-    const result = await findBestRoute(origin, destination);
+    const options = await findRouteOptions(origin, destination);
 
-    if (!result) {
+    if (!options || options.length === 0) {
       return Response.json(
-        { error: "No valid bus route found for the given locations." },
-        { status: 404 },
+        { error: "No bus routes or transfer combinations found for these locations." },
+        { status: 404 }
       );
     }
 
-    return Response.json(result);
+    return Response.json({
+      options,
+      bestMatch: options[0],
+    });
   } catch (err) {
     console.error("[find-route] Error:", err);
     return Response.json(
       { error: "Internal server error." },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

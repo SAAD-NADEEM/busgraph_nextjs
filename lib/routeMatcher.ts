@@ -1,116 +1,394 @@
 /**
- * Route matching engine.
+ * Multi-route and multi-hop transfer routing engine.
  *
- * Evaluates all loaded KML routes against a user's origin and
- * destination, performing polyline snapping and direction validation
- * to find the best single-bus route.
+ * Evaluates all loaded KML routes to find:
+ * 1. Direct single-bus route options.
+ * 2. Multi-bus transfer options (Bus 1 -> Transfer Hub -> Bus 2).
  */
 
 import type { LatLng, SnapResult } from "./haversine";
-import { snapToRoute, snapToRouteAfter } from "./haversine";
-import { loadAllRoutes } from "./kmlParser";
+import { snapToRoute, snapToRouteAfter, haversineDistance } from "./haversine";
+import { loadAllRoutes, ParsedRoute } from "./kmlParser";
+import { resolveStopName } from "./stopResolver";
 
-
-export interface RouteMatch {
-  /** Route identifier, e.g. "R3" */
+export interface SingleLeg {
   routeId: string;
-  /** Human-readable name */
   routeName: string;
-  /** Direction identifier */
   direction: string;
-  /** Snapped boarding point */
-  startNode: SnapResult;
-  /** Snapped alighting point */
-  endNode: SnapResult;
-  /**
-   * Slice of route coordinates from startNode to endNode (inclusive).
-   * In [lng, lat] format for direct use with Mapbox/GeoJSON.
-   */
+  boardPoint: LatLng;
+  alightPoint: LatLng;
+  boardStopName: string;
+  alightStopName: string;
   busPath: [number, number][];
-  /** Walking segment: user's origin → snapped boarding point */
-  walkToStart: { from: LatLng; to: LatLng };
-  /** Walking segment: snapped alighting point → user's destination */
-  walkFromEnd: { from: LatLng; to: LatLng };
-  /** Combined snap distance in meters (origin→start + destination→end) */
-  totalSnapDistance: number;
+  rideDistanceM: number;
+  isTerminalStart?: boolean;
+  isTerminalEnd?: boolean;
+}
+
+export interface TransitOption {
+  id: string;
+  type: "direct" | "transfer";
+  summary: string;
+  legs: SingleLeg[];
+  /** Walking from origin to first boarding point */
+  walkToStart: { from: LatLng; to: LatLng; distanceM: number; stopName: string };
+  /** Walking transfers between buses (empty for direct) */
+  transfers: { from: LatLng; to: LatLng; distanceM: number; fromStopName: string; toStopName: string }[];
+  /** Walking from last alighting point to destination */
+  walkFromEnd: { from: LatLng; to: LatLng; distanceM: number; stopName: string };
+  /** Total walking distance in meters */
+  totalWalkDistanceM: number;
+  /** Total bus ride distance in meters */
+  totalBusDistanceM: number;
+  /** Composite score for ranking options (lower is better) */
+  score: number;
+  /** Flagged if walking exceeds bus ride distance */
+  isHighWalk?: boolean;
+}
+
+const MAX_DIRECT_WALK_M = 3_000; // 3km maximum walk to direct route
+const MAX_ORIGIN_TRANSFER_SNAP_M = 2_500; // 2.5km maximum walk to start first bus
+const MAX_DEST_TRANSFER_SNAP_M = 2_500; // 2.5km maximum walk from last bus to destination
+const MAX_TRANSFER_WALK_M = 1_000; // 1km maximum walk between transfer stops
+
+function calcBusDistance(coords: [number, number][]): number {
+  let dist = 0;
+  for (let i = 1; i < coords.length; i++) {
+    dist += haversineDistance(
+      { lat: coords[i - 1][1], lng: coords[i - 1][0] },
+      { lat: coords[i][1], lng: coords[i][0] }
+    );
+  }
+  return dist;
+}
+
+interface RouteVariant {
+  routeId: string;
+  routeName: string;
+  direction: string;
+  coordinates: LatLng[];
+}
+
+function getVariants(allRoutes: ParsedRoute[]): RouteVariant[] {
+  const list: RouteVariant[] = [];
+  for (const route of allRoutes) {
+    list.push({
+      routeId: route.routeId,
+      routeName: route.name,
+      direction: route.direction,
+      coordinates: route.coordinates,
+    });
+    list.push({
+      routeId: route.routeId,
+      routeName: route.name,
+      direction: route.direction.replace(/_UP$/, "_DOWN").replace(/_DOWN$/, "_UP"),
+      coordinates: [...route.coordinates].reverse(),
+    });
+  }
+  return list;
 }
 
 /**
- * Maximum snap distance in meters.
- * Set to 25,000m (25 km) to allow very large walking/boarding radiuses (3-5+ km)
- * across the Karachi metropolitan region.
+ * Finds both direct and multi-bus transfer routes between origin and destination.
  */
-const MAX_SNAP_DISTANCE_M = 25_000;
-
-/**
- * Find the best bus route for the given origin and destination.
- *
- * Logic:
- * 1. For each loaded route, snap origin → startNode and destination → endNode.
- * 2. Validate direction: endNode.index must be > startNode.index.
- * 3. Reject routes where either snap distance exceeds MAX_SNAP_DISTANCE_M.
- * 4. Return the route with the lowest total snap distance.
- *
- * @returns The best matching route, or null if no valid route exists.
- */
-export async function findBestRoute(
+export async function findRouteOptions(
   origin: LatLng,
-  destination: LatLng,
-): Promise<RouteMatch | null> {
+  destination: LatLng
+): Promise<TransitOption[]> {
   const allRoutes = await loadAllRoutes();
-  const candidates: RouteMatch[] = [];
+  const variants = getVariants(allRoutes);
 
-  for (const route of allRoutes) {
-    // Test both the stored direction (UP) and its reverse (implied DOWN).
-    // Each KML only contains one direction, so reversing gives us the return trip.
-    const variants = [
-      { coordinates: route.coordinates, direction: route.direction },
-      {
-        coordinates: [...route.coordinates].reverse(),
-        direction: route.direction.replace(/_UP$/, "_DOWN").replace(/_DOWN$/, "_UP"),
+  const directOptions: TransitOption[] = [];
+  const transferOptions: TransitOption[] = [];
+
+  // ── 1. Find Direct Routes ───────────────────────────────────────────
+  for (const v of variants) {
+    const startNode = snapToRoute(origin, v.coordinates);
+    if (startNode.index >= v.coordinates.length - 1) continue;
+
+    const endNode = snapToRouteAfter(destination, v.coordinates, startNode.index);
+
+    if (
+      startNode.distance > MAX_DIRECT_WALK_M ||
+      endNode.distance > MAX_DIRECT_WALK_M
+    ) {
+      continue;
+    }
+
+    const busCoords: [number, number][] = v.coordinates
+      .slice(startNode.index, endNode.index + 1)
+      .map((c) => [c.lng, c.lat]);
+
+    const rideDist = calcBusDistance(busCoords);
+    if (rideDist < 100) continue;
+
+    const isTerminalStart = startNode.index <= 5;
+    const isTerminalEnd = endNode.index >= v.coordinates.length - 6;
+
+    const totalWalk = startNode.distance + endNode.distance;
+    const isHighWalk = totalWalk > rideDist;
+    const score = totalWalk * 3.0 + rideDist * 0.4 + (isHighWalk ? 2500 : 0);
+
+    directOptions.push({
+      id: `direct-${v.routeId}-${v.direction}`,
+      type: "direct",
+      summary: `Direct via ${v.routeId}`,
+      legs: [
+        {
+          routeId: v.routeId,
+          routeName: v.routeName,
+          direction: v.direction,
+          boardPoint: startNode.point,
+          alightPoint: endNode.point,
+          boardStopName: "",
+          alightStopName: "",
+          busPath: busCoords,
+          rideDistanceM: rideDist,
+          isTerminalStart,
+          isTerminalEnd,
+        },
+      ],
+      walkToStart: {
+        from: origin,
+        to: startNode.point,
+        distanceM: startNode.distance,
+        stopName: "",
       },
-    ];
+      transfers: [],
+      walkFromEnd: {
+        from: endNode.point,
+        to: destination,
+        distanceM: endNode.distance,
+        stopName: "",
+      },
+      totalWalkDistanceM: totalWalk,
+      totalBusDistanceM: rideDist,
+      score,
+      isHighWalk,
+    });
+  }
 
-    for (const variant of variants) {
-      // Snap origin to nearest point on this variant
-      const startNode = snapToRoute(origin, variant.coordinates);
+  // Deduplicate direct routes by routeId keeping the best score
+  const uniqueDirectMap = new Map<string, TransitOption>();
+  for (const opt of directOptions) {
+    const key = opt.legs[0].routeId;
+    if (!uniqueDirectMap.has(key) || opt.score < uniqueDirectMap.get(key)!.score) {
+      uniqueDirectMap.set(key, opt);
+    }
+  }
+  const filteredDirect = Array.from(uniqueDirectMap.values()).sort(
+    (a, b) => a.score - b.score
+  );
 
-      // No room to travel forward — skip
-      if (startNode.index >= variant.coordinates.length - 1) continue;
+  // ── 2. Find Multi-Hop Transfer Routes (Bus A -> Bus B) ─────────────
+  const originCandidates: { variant: RouteVariant; boardNode: SnapResult }[] = [];
+  const destCandidates: { variant: RouteVariant; alightNode: SnapResult }[] = [];
 
-      // Snap destination to nearest point strictly AFTER the boarding index
-      const endNode = snapToRouteAfter(destination, variant.coordinates, startNode.index);
+  for (const v of variants) {
+    const startNode = snapToRoute(origin, v.coordinates);
+    if (startNode.distance <= MAX_ORIGIN_TRANSFER_SNAP_M && startNode.index < v.coordinates.length - 2) {
+      originCandidates.push({ variant: v, boardNode: startNode });
+    }
 
-      // Reject if either snap point is too far from the route
-      if (
-        startNode.distance > MAX_SNAP_DISTANCE_M ||
-        endNode.distance > MAX_SNAP_DISTANCE_M
-      ) {
-        continue;
-      }
-
-      // Extract the bus path segment (inclusive), converting to [lng, lat] for Mapbox
-      const busPath: [number, number][] = variant.coordinates
-        .slice(startNode.index, endNode.index + 1)
-        .map((coord) => [coord.lng, coord.lat]);
-
-      candidates.push({
-        routeId: route.routeId,
-        routeName: route.name,
-        direction: variant.direction,
-        startNode,
-        endNode,
-        busPath,
-        walkToStart: { from: origin, to: startNode.point },
-        walkFromEnd: { from: endNode.point, to: destination },
-        totalSnapDistance: startNode.distance + endNode.distance,
-      });
+    const endNode = snapToRoute(destination, v.coordinates);
+    if (endNode.distance <= MAX_DEST_TRANSFER_SNAP_M && endNode.index > 1) {
+      destCandidates.push({ variant: v, alightNode: endNode });
     }
   }
 
-  if (candidates.length === 0) return null;
+  for (const orig of originCandidates) {
+    for (const dest of destCandidates) {
+      if (orig.variant.routeId === dest.variant.routeId) continue;
 
-  // Return the candidate with the lowest total snap distance
-  candidates.sort((a, b) => a.totalSnapDistance - b.totalSnapDistance);
-  return candidates[0];
+      let bestTransferDist = Infinity;
+      let bestOrigTransferIdx = -1;
+      let bestDestTransferIdx = -1;
+
+      // Sample along routes for performance
+      const step1 = Math.max(1, Math.floor((orig.variant.coordinates.length - orig.boardNode.index) / 40));
+      const step2 = Math.max(1, Math.floor(dest.alightNode.index / 40));
+
+      for (let i = orig.boardNode.index + 2; i < orig.variant.coordinates.length; i += step1) {
+        const pt1 = orig.variant.coordinates[i];
+        for (let j = 1; j < dest.alightNode.index; j += step2) {
+          const pt2 = dest.variant.coordinates[j];
+          const dist = haversineDistance(pt1, pt2);
+          if (dist < bestTransferDist) {
+            bestTransferDist = dist;
+            bestOrigTransferIdx = i;
+            bestDestTransferIdx = j;
+          }
+        }
+      }
+
+      if (
+        bestTransferDist <= MAX_TRANSFER_WALK_M &&
+        bestOrigTransferIdx > orig.boardNode.index &&
+        bestDestTransferIdx < dest.alightNode.index
+      ) {
+        const leg1Coords: [number, number][] = orig.variant.coordinates
+          .slice(orig.boardNode.index, bestOrigTransferIdx + 1)
+          .map((c) => [c.lng, c.lat]);
+
+        const leg2Coords: [number, number][] = dest.variant.coordinates
+          .slice(bestDestTransferIdx, dest.alightNode.index + 1)
+          .map((c) => [c.lng, c.lat]);
+
+        const ride1 = calcBusDistance(leg1Coords);
+        const ride2 = calcBusDistance(leg2Coords);
+        if (ride1 < 300 || ride2 < 300) continue;
+
+        const isTerminalStart1 = orig.boardNode.index <= 5;
+        const isTerminalEnd1 = bestOrigTransferIdx >= orig.variant.coordinates.length - 6;
+        const isTerminalStart2 = bestDestTransferIdx <= 5;
+        const isTerminalEnd2 = dest.alightNode.index >= dest.variant.coordinates.length - 6;
+
+        const totalWalk =
+          orig.boardNode.distance + bestTransferDist + dest.alightNode.distance;
+        const totalRide = ride1 + ride2;
+
+        const isHighWalk = totalWalk > totalRide;
+        const score = totalWalk * 3.0 + totalRide * 0.4 + 450 + (isHighWalk ? 2500 : 0);
+
+        transferOptions.push({
+          id: `transfer-${orig.variant.routeId}-${dest.variant.routeId}`,
+          type: "transfer",
+          summary: `Transfer: ${orig.variant.routeId} ➔ ${dest.variant.routeId}`,
+          legs: [
+            {
+              routeId: orig.variant.routeId,
+              routeName: orig.variant.routeName,
+              direction: orig.variant.direction,
+              boardPoint: orig.boardNode.point,
+              alightPoint: orig.variant.coordinates[bestOrigTransferIdx],
+              boardStopName: "",
+              alightStopName: "",
+              busPath: leg1Coords,
+              rideDistanceM: ride1,
+              isTerminalStart: isTerminalStart1,
+              isTerminalEnd: isTerminalEnd1,
+            },
+            {
+              routeId: dest.variant.routeId,
+              routeName: dest.variant.routeName,
+              direction: dest.variant.direction,
+              boardPoint: dest.variant.coordinates[bestDestTransferIdx],
+              alightPoint: dest.alightNode.point,
+              boardStopName: "",
+              alightStopName: "",
+              busPath: leg2Coords,
+              rideDistanceM: ride2,
+              isTerminalStart: isTerminalStart2,
+              isTerminalEnd: isTerminalEnd2,
+            },
+          ],
+          walkToStart: {
+            from: origin,
+            to: orig.boardNode.point,
+            distanceM: orig.boardNode.distance,
+            stopName: "",
+          },
+          transfers: [
+            {
+              from: orig.variant.coordinates[bestOrigTransferIdx],
+              to: dest.variant.coordinates[bestDestTransferIdx],
+              distanceM: bestTransferDist,
+              fromStopName: "",
+              toStopName: "",
+            },
+          ],
+          walkFromEnd: {
+            from: dest.alightNode.point,
+            to: destination,
+            distanceM: dest.alightNode.distance,
+            stopName: "",
+          },
+          totalWalkDistanceM: totalWalk,
+          totalBusDistanceM: totalRide,
+          score,
+          isHighWalk,
+        });
+      }
+    }
+  }
+
+  // Deduplicate transfer combinations by route pair
+  const uniqueTransferMap = new Map<string, TransitOption>();
+  for (const opt of transferOptions) {
+    const key = `${opt.legs[0].routeId}->${opt.legs[1].routeId}`;
+    if (!uniqueTransferMap.has(key) || opt.score < uniqueTransferMap.get(key)!.score) {
+      uniqueTransferMap.set(key, opt);
+    }
+  }
+
+  // Combine all deduplicated direct and transfer options into a unified pool
+  const allCandidates: TransitOption[] = [
+    ...uniqueDirectMap.values(),
+    ...uniqueTransferMap.values(),
+  ];
+
+  // Sort by transit score (lowest physical effort / optimal transit utility first)
+  allCandidates.sort((a, b) => a.score - b.score);
+
+  // Take the top 5 overall options
+  const combined: TransitOption[] = allCandidates.slice(0, 5);
+
+  // Resolve human-readable stop names for the selected options
+  for (const opt of combined) {
+    for (let i = 0; i < opt.legs.length; i++) {
+      const leg = opt.legs[i];
+      leg.boardStopName = await resolveStopName(
+        leg.boardPoint,
+        leg.routeName,
+        !!leg.isTerminalStart,
+        false
+      );
+      leg.alightStopName = await resolveStopName(
+        leg.alightPoint,
+        leg.routeName,
+        false,
+        !!leg.isTerminalEnd
+      );
+    }
+
+    opt.walkToStart.stopName = opt.legs[0].boardStopName;
+    opt.walkFromEnd.stopName = opt.legs[opt.legs.length - 1].alightStopName;
+
+    for (let i = 0; i < opt.transfers.length; i++) {
+      opt.transfers[i].fromStopName = opt.legs[i].alightStopName;
+      opt.transfers[i].toStopName = opt.legs[i + 1].boardStopName;
+    }
+  }
+
+  return combined;
+}
+
+/**
+ * Backward compatibility helper for single route match queries.
+ */
+export async function findBestRoute(origin: LatLng, destination: LatLng) {
+  const options = await findRouteOptions(origin, destination);
+  if (options.length === 0) return null;
+  const best = options[0];
+
+  return {
+    routeId: best.legs[0].routeId,
+    routeName: best.legs[0].routeName,
+    direction: best.legs[0].direction,
+    startNode: {
+      point: best.legs[0].boardPoint,
+      index: 0,
+      distance: best.walkToStart.distanceM,
+    },
+    endNode: {
+      point: best.legs[best.legs.length - 1].alightPoint,
+      index: 0,
+      distance: best.walkFromEnd.distanceM,
+    },
+    busPath: best.legs[0].busPath,
+    walkToStart: best.walkToStart,
+    walkFromEnd: best.walkFromEnd,
+    totalSnapDistance: best.totalWalkDistanceM,
+    allOptions: options,
+  };
 }

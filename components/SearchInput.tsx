@@ -6,15 +6,40 @@ interface Props {
   placeholder: string;
   onSelect: (label: string, coords: [number, number]) => void;
   onClear?: () => void;
+  dark?: boolean;
+  initialValue?: string;
 }
 
-export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
-  const [query, setQuery] = useState("");
+export default function SearchInput({
+  placeholder,
+  onSelect,
+  onClear,
+  dark = true,
+  initialValue = "",
+}: Props) {
+  const [query, setQuery] = useState(initialValue);
   const [suggestions, setSuggestions] = useState<AutocompleteResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (initialValue !== undefined && initialValue !== query) {
+      setQuery(initialValue);
+    }
+  }, [initialValue]);
 
   useEffect(() => {
     if (selectionRef.current) {
@@ -43,10 +68,9 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
 
   const handleSelect = (item: AutocompleteResult) => {
     selectionRef.current = true;
-    const chosenName = item.name || item.label;
-    setQuery(chosenName);
+    setQuery(item.label);
     setOpen(false);
-    onSelect(chosenName, item.coords);
+    onSelect(item.label, item.coords);
   };
 
   const handleClear = () => {
@@ -57,7 +81,7 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -67,7 +91,9 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
           width: "100%",
           padding: "10px 32px 10px 10px",
           borderRadius: "8px",
-          border: "1px solid #ddd",
+          border: dark ? "1px solid #334155" : "1px solid #ddd",
+          background: dark ? "#1e293b" : "white",
+          color: dark ? "#f8fafc" : "#111827",
           boxSizing: "border-box",
           fontSize: "14px",
           outline: "none",
@@ -82,7 +108,7 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
             top: "50%",
             transform: "translateY(-50%)",
             fontSize: "11px",
-            color: "#888",
+            color: dark ? "#94a3b8" : "#888",
           }}
         >
           Searching...
@@ -100,7 +126,7 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
             transform: "translateY(-50%)",
             background: "none",
             border: "none",
-            color: "#999",
+            color: dark ? "#94a3b8" : "#999",
             cursor: "pointer",
             fontSize: "14px",
             padding: "2px 6px",
@@ -122,16 +148,18 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
             top: "100%",
             left: 0,
             right: 0,
-            background: "white",
-            border: "1px solid #ddd",
+            background: dark ? "#1e293b" : "white",
+            border: dark ? "1px solid #334155" : "1px solid #ddd",
             borderRadius: "8px",
             marginTop: "4px",
             listStyle: "none",
             padding: 0,
-            zIndex: 1000,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            zIndex: 9999,
+            boxShadow: dark ? "0 8px 24px rgba(0,0,0,0.5)" : "0 4px 12px rgba(0,0,0,0.15)",
             maxHeight: "220px",
             overflowY: "auto",
+            scrollbarWidth: "thin",
+            scrollbarColor: dark ? "#334155 transparent" : "#cbd5e1 transparent",
           }}
         >
           {suggestions.length > 0
@@ -140,43 +168,28 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
                   key={i}
                   onClick={() => handleSelect(item)}
                   style={{
-                    padding: "8px 12px",
+                    padding: "9px 12px",
                     cursor: "pointer",
-                    borderBottom: "1px solid #f0f0f0",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "2px",
+                    borderBottom: dark ? "1px solid #334155" : "1px solid #f0f0f0",
                     textAlign: "left",
+                    background: dark ? "#1e293b" : "white",
                   }}
                   onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "#f5f5f5")
+                    (e.currentTarget.style.background = dark ? "#334155" : "#f5f5f5")
                   }
                   onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "white")
+                    (e.currentTarget.style.background = dark ? "#1e293b" : "white")
                   }
                 >
                   <div
                     style={{
-                      fontWeight: 600,
                       fontSize: "13px",
-                      color: "#1f2937",
+                      color: dark ? "#f8fafc" : "#1f2937",
+                      lineHeight: "1.4",
                     }}
                   >
-                    {item.name || item.label}
+                    {item.label}
                   </div>
-                  {item.subtitle && (
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "#6b7280",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {item.subtitle}
-                    </div>
-                  )}
                 </li>
               ))
             : !loading && (
@@ -184,7 +197,7 @@ export default function SearchInput({ placeholder, onSelect, onClear }: Props) {
                   style={{
                     padding: "10px 12px",
                     fontSize: "13px",
-                    color: "#999",
+                    color: dark ? "#94a3b8" : "#999",
                   }}
                 >
                   No results found for Karachi

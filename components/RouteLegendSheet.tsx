@@ -21,6 +21,7 @@ interface RouteLegendSheetProps {
   visibleRouteIds: Set<string>;
   /** Called when the user toggles a route checkbox */
   onToggleRoute: (routeId: string, checked: boolean) => void;
+  dark?: boolean;
 }
 
 /**
@@ -34,6 +35,7 @@ export default function RouteLegendSheet({
   loading,
   visibleRouteIds,
   onToggleRoute,
+  dark = true,
 }: RouteLegendSheetProps) {
   // Deduplicate routes by routeId so each bus only appears once
   const uniqueRoutes = Array.from(
@@ -50,9 +52,23 @@ export default function RouteLegendSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" showOverlay={false} className="w-72 max-w-xs p-0 flex flex-col">
-        <SheetHeader className="px-5 pt-5 pb-3 border-b border-gray-100">
-          <SheetTitle className="text-base font-semibold text-gray-800 flex items-center gap-2">
+      <SheetContent
+        side="right"
+        showOverlay={false}
+        className={`w-72 max-w-xs p-0 flex flex-col ${
+          dark ? "bg-slate-900 border-l border-slate-800 text-slate-100" : "bg-white"
+        }`}
+      >
+        <SheetHeader
+          className={`px-5 pt-5 pb-3 border-b ${
+            dark ? "border-slate-800" : "border-gray-100"
+          }`}
+        >
+          <SheetTitle
+            className={`text-base font-semibold flex items-center gap-2 ${
+              dark ? "text-slate-100" : "text-gray-800"
+            }`}
+          >
             <span
               style={{
                 display: "inline-block",
@@ -65,7 +81,7 @@ export default function RouteLegendSheet({
             />
             Map Legend
           </SheetTitle>
-          <SheetDescription className="text-xs text-gray-500">
+          <SheetDescription className={`text-xs ${dark ? "text-slate-400" : "text-gray-500"}`}>
             Toggle bus routes visible on the map
           </SheetDescription>
         </SheetHeader>
@@ -75,7 +91,7 @@ export default function RouteLegendSheet({
           <div
             style={{
               padding: "10px 20px",
-              borderBottom: "1px solid #f3f4f6",
+              borderBottom: dark ? "1px solid #1e293b" : "1px solid #f3f4f6",
               display: "flex",
               alignItems: "center",
               gap: 8,
@@ -90,7 +106,13 @@ export default function RouteLegendSheet({
             />
             <label
               htmlFor="legend-select-all"
-              style={{ fontSize: 13, fontWeight: 600, color: "#374151", cursor: "pointer", userSelect: "none" }}
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: dark ? "#e2e8f0" : "#374151",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
             >
               {allChecked ? "Hide all" : "Show all"} routes
             </label>
@@ -104,7 +126,7 @@ export default function RouteLegendSheet({
               style={{
                 padding: "20px",
                 textAlign: "center",
-                color: "#9ca3af",
+                color: dark ? "#64748b" : "#9ca3af",
                 fontSize: 13,
               }}
             >
@@ -117,7 +139,7 @@ export default function RouteLegendSheet({
               style={{
                 padding: "20px",
                 textAlign: "center",
-                color: "#9ca3af",
+                color: dark ? "#64748b" : "#9ca3af",
                 fontSize: 13,
               }}
             >
@@ -145,14 +167,14 @@ export default function RouteLegendSheet({
                   cursor: "pointer",
                   userSelect: "none",
                   transition: "background 0.15s",
-                  background: checked ? `${color}12` : "transparent",
+                  background: checked ? `${color}22` : "transparent",
                   borderLeft: checked ? `3px solid ${color}` : "3px solid transparent",
                 }}
                 onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = `${color}1a`)
+                  (e.currentTarget.style.background = `${color}2a`)
                 }
                 onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = checked ? `${color}12` : "transparent")
+                  (e.currentTarget.style.background = checked ? `${color}22` : "transparent")
                 }
               >
                 {/* Color swatch */}
@@ -163,7 +185,9 @@ export default function RouteLegendSheet({
                     height: 12,
                     borderRadius: "50%",
                     background: color,
-                    boxShadow: `0 0 0 2px white, 0 0 0 3px ${color}`,
+                    boxShadow: dark
+                      ? `0 0 0 2px #0f172a, 0 0 0 3px ${color}`
+                      : `0 0 0 2px white, 0 0 0 3px ${color}`,
                   }}
                 />
 
@@ -182,7 +206,7 @@ export default function RouteLegendSheet({
                   <span
                     style={{
                       fontSize: 12,
-                      color: "#374151",
+                      color: dark ? "#cbd5e1" : "#374151",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",

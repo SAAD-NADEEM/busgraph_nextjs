@@ -3,52 +3,52 @@ import { useState, useRef } from "react";
 import Map, { NavigationControl } from "react-map-gl/mapbox";
 import RouteLayer from "@/components/RouteLayer";
 import WalkingLayer from "@/components/WalkingLayer";
-import SnapMarkers from "@/components/SnapMarkers";
+import SnapMarkers, { MarkerPoint } from "@/components/SnapMarkers";
 import SearchInput from "@/components/SearchInput";
 import AllRoutesLayer, { RouteData } from "@/components/AllRoutesLayer";
 import RouteLegendSheet from "@/components/RouteLegendSheet";
 import { getRouteColor } from "@/lib/routeColors";
 import { getWalkingRoute } from "@/utils/walkingRoute";
+import type { TransitOption } from "@/lib/routeMatcher";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-/** Shape returned by POST /api/find-route */
-interface RouteMatch {
-  routeId: string;
-  routeName: string;
-  direction: string;
-  startNode: { point: { lat: number; lng: number }; index: number; distance: number };
-  endNode: { point: { lat: number; lng: number }; index: number; distance: number };
-  busPath: [number, number][];
-  walkToStart: { from: { lat: number; lng: number }; to: { lat: number; lng: number } };
-  walkFromEnd: { from: { lat: number; lng: number }; to: { lat: number; lng: number } };
-  totalSnapDistance: number;
+interface WalkingLegState {
+  id: string;
+  coords: [number, number][];
+  distanceM: number;
+  durationSec: number;
 }
 
 export default function HomePage() {
   const [originCoords, setOriginCoords] = useState<[number, number] | null>(null);
   const [destCoords, setDestCoords] = useState<[number, number] | null>(null);
-  const [routeMatch, setRouteMatch] = useState<RouteMatch | null>(null);
+  const [originName, setOriginName] = useState("");
+  const [destName, setDestName] = useState("");
 
-  // Routed walking path coordinates and route stats (distance in meters, duration in seconds)
-  const [walkToStartCoords, setWalkToStartCoords] = useState<[number, number][]>([]);
-  const [walkFromEndCoords, setWalkFromEndCoords] = useState<[number, number][]>([]);
-  const [walkToStartInfo, setWalkToStartInfo] = useState<{ distance: number; duration: number } | null>(null);
-  const [walkFromEndInfo, setWalkFromEndInfo] = useState<{ distance: number; duration: number } | null>(null);
+  // Multi-option state
+  const [options, setOptions] = useState<TransitOption[]>([]);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+
+  // Walking paths cache for selected option
+  const [walkingLegs, setWalkingLegs] = useState<WalkingLegState[]>([]);
 
   // Legend sheet state
   const [legendOpen, setLegendOpen] = useState(false);
   const [allRoutes, setAllRoutes] = useState<RouteData[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
-  // Per-route visibility — only routes in this set are rendered on the map
   const [visibleRouteIds, setVisibleRouteIds] = useState<Set<string>>(new Set());
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  // Incrementing this key force-remounts SearchInput fields (clears their text)
   const [searchKey, setSearchKey] = useState(0);
+  const [mapTheme, setMapTheme] = useState<"dark" | "streets">("dark");
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const mapRef = useRef<any>(null);
 
-  /** Open the legend sheet and lazily fetch routes the first time */
+  const selectedOption =
+    options.find((o) => o.id === selectedOptionId) || options[0] || null;
+  const isDark = mapTheme === "dark";
+
   const handleOpenLegend = async () => {
     setLegendOpen(true);
     if (allRoutes.length === 0) {
@@ -58,7 +58,6 @@ export default function HomePage() {
         if (res.ok) {
           const data: RouteData[] = await res.json();
           setAllRoutes(data);
-          // Start with all routes visible when first loaded
           setVisibleRouteIds(new Set(data.map((r) => r.routeId)));
         }
       } catch (err) {
@@ -69,7 +68,6 @@ export default function HomePage() {
     }
   };
 
-  /** Toggle a single route on/off */
   const handleToggleRoute = (routeId: string, checked: boolean) => {
     setVisibleRouteIds((prev) => {
       const next = new Set(prev);
@@ -82,14 +80,87 @@ export default function HomePage() {
   const handleReset = () => {
     setOriginCoords(null);
     setDestCoords(null);
-    setRouteMatch(null);
-    setWalkToStartCoords([]);
-    setWalkFromEndCoords([]);
-    setWalkToStartInfo(null);
-    setWalkFromEndInfo(null);
+    setOriginName("");
+    setDestName("");
+    setOptions([]);
+    setSelectedOptionId(null);
+    setWalkingLegs([]);
     setError("");
-    setSearchKey((k) => k + 1); // clears SearchInput text
+    setSearchKey((k) => k + 1);
+    setIsCollapsed(false);
     mapRef.current?.flyTo({ center: [67.0011, 24.8607], zoom: 12, duration: 800 });
+  };
+
+  // Fetch walking routes whenever the active option changes
+  const loadOptionPaths = async (opt: TransitOption) => {
+    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+    const legsToFetch: { id: string; from: { lat: number; lng: number }; to: { lat: number; lng: number } }[] = [];
+
+    // Walk to first bus
+    legsToFetch.push({
+      id: "walk-start",
+      from: opt.walkToStart.from,
+      to: opt.walkToStart.to,
+    });
+
+    // Transfer walks (if multi-bus)
+    opt.transfers.forEach((tr, i) => {
+      legsToFetch.push({
+        id: `walk-transfer-${i}`,
+        from: tr.from,
+        to: tr.to,
+      });
+    });
+
+    // Walk from last bus to destination
+    legsToFetch.push({
+      id: "walk-end",
+      from: opt.walkFromEnd.from,
+      to: opt.walkFromEnd.to,
+    });
+
+    const results = await Promise.all(
+      legsToFetch.map(async (item) => {
+        const res = await getWalkingRoute(item.from, item.to, token);
+        return {
+          id: item.id,
+          coords: res.coordinates,
+          distanceM: res.distance,
+          durationSec: res.duration,
+        };
+      })
+    );
+
+    setWalkingLegs(results);
+
+    // Zoom and center map to include all legs
+    const allLngs: number[] = [opt.walkToStart.from.lng, opt.walkFromEnd.to.lng];
+    const allLats: number[] = [opt.walkToStart.from.lat, opt.walkFromEnd.to.lat];
+
+    opt.legs.forEach((l) => {
+      l.busPath.forEach(([lng, lat]) => {
+        allLngs.push(lng);
+        allLats.push(lat);
+      });
+    });
+
+    if (allLngs.length > 0 && mapRef.current) {
+      mapRef.current.fitBounds(
+        [
+          [Math.min(...allLngs), Math.min(...allLats)],
+          [Math.max(...allLngs), Math.max(...allLats)],
+        ],
+        { padding: 80 }
+      );
+    }
+  };
+
+  const handleSelectOption = (optId: string) => {
+    setSelectedOptionId(optId);
+    const chosen = options.find((o) => o.id === optId);
+    if (chosen) {
+      loadOptionPaths(chosen);
+    }
   };
 
   const handleSubmit = async () => {
@@ -99,14 +170,11 @@ export default function HomePage() {
     }
     setLoading(true);
     setError("");
-    setRouteMatch(null);
-    setWalkToStartCoords([]);
-    setWalkFromEndCoords([]);
-    setWalkToStartInfo(null);
-    setWalkFromEndInfo(null);
+    setOptions([]);
+    setSelectedOptionId(null);
+    setWalkingLegs([]);
 
     try {
-      // originCoords from Nominatim/SearchInput are [lng, lat]
       const origin = { lat: originCoords[1], lng: originCoords[0] };
       const destination = { lat: destCoords[1], lng: destCoords[0] };
 
@@ -118,52 +186,91 @@ export default function HomePage() {
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "No route found.");
+        throw new Error(data.error || "No route options found.");
       }
 
-      const match: RouteMatch = await res.json();
-      setRouteMatch(match);
+      const data = await res.json();
+      const foundOptions: TransitOption[] = data.options || [];
 
-      // Fetch walking routes from Mapbox Directions API in parallel
-      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-      const [toStartResult, fromEndResult] = await Promise.all([
-        getWalkingRoute(match.walkToStart.from, match.walkToStart.to, token),
-        getWalkingRoute(match.walkFromEnd.from, match.walkFromEnd.to, token),
-      ]);
-      setWalkToStartCoords(toStartResult.coordinates);
-      setWalkFromEndCoords(fromEndResult.coordinates);
-      setWalkToStartInfo({ distance: toStartResult.distance, duration: toStartResult.duration });
-      setWalkFromEndInfo({ distance: fromEndResult.distance, duration: fromEndResult.duration });
+      if (foundOptions.length === 0) {
+        throw new Error("No routes found connecting these areas.");
+      }
 
-      // Fit the map to include the full bus path + walking endpoints
-      const allLngs = [
-        origin.lng,
-        destination.lng,
-        match.startNode.point.lng,
-        match.endNode.point.lng,
-      ];
-      const allLats = [
-        origin.lat,
-        destination.lat,
-        match.startNode.point.lat,
-        match.endNode.point.lat,
-      ];
-
-      mapRef.current?.fitBounds(
-        [
-          [Math.min(...allLngs), Math.min(...allLats)],
-          [Math.max(...allLngs), Math.max(...allLats)],
-        ],
-        { padding: 80 },
-      );
+      setOptions(foundOptions);
+      setSelectedOptionId(foundOptions[0].id);
+      await loadOptionPaths(foundOptions[0]);
     } catch (err: any) {
-      setError(err.message || "Could not find a bus route.");
+      setError(err.message || "Could not find a route.");
     } finally {
       setLoading(false);
     }
   };
 
+  // Build markers for the selected option
+  const markers: MarkerPoint[] = [];
+  if (selectedOption) {
+    // User start
+    markers.push({
+      lat: selectedOption.walkToStart.from.lat,
+      lng: selectedOption.walkToStart.from.lng,
+      label: "Start",
+      type: "origin",
+      badge: "Origin",
+    });
+
+    // Each bus boarding / alighting
+    selectedOption.legs.forEach((leg, i) => {
+      // Boarding marker
+      markers.push({
+        lat: leg.boardPoint.lat,
+        lng: leg.boardPoint.lng,
+        label: i === 0 ? `Board ${leg.routeId} at ${leg.boardStopName}` : `Switch to ${leg.routeId} at ${leg.boardStopName}`,
+        type: i === 0 ? "board" : "transfer",
+        badge: i === 0 ? `Board ${leg.routeId}` : `Switch ➔ ${leg.routeId}`,
+      });
+
+      // Transfer exit marker (if not the last leg)
+      if (i < selectedOption.legs.length - 1) {
+        markers.push({
+          lat: leg.alightPoint.lat,
+          lng: leg.alightPoint.lng,
+          label: `Alight ${leg.routeId} at ${leg.alightStopName}`,
+          type: "transfer",
+          badge: `Exit ${leg.routeId}`,
+        });
+      }
+
+      // Final alighting marker
+      if (i === selectedOption.legs.length - 1) {
+        markers.push({
+          lat: leg.alightPoint.lat,
+          lng: leg.alightPoint.lng,
+          label: `Alight ${leg.routeId} at ${leg.alightStopName}`,
+          type: "alight",
+          badge: `Exit ${leg.routeId}`,
+        });
+      }
+    });
+
+    // User destination
+    markers.push({
+      lat: selectedOption.walkFromEnd.to.lat,
+      lng: selectedOption.walkFromEnd.to.lng,
+      label: "Destination",
+      type: "destination",
+      badge: "Destination",
+    });
+  }
+
   const anyRouteVisible = visibleRouteIds.size > 0 && allRoutes.length > 0;
+
+  const fmtDist = (m: number) =>
+    m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(2)}km`;
+
+  const fmtWalk = (distM: number, durationSec?: number) => {
+    const mins = Math.max(1, Math.round((durationSec ?? distM / 1.33) / 60));
+    return `~${mins} min${mins === 1 ? "" : "s"} (${fmtDist(distM)})`;
+  };
 
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
@@ -171,46 +278,67 @@ export default function HomePage() {
         ref={mapRef}
         initialViewState={{ longitude: 67.0011, latitude: 24.8607, zoom: 12 }}
         style={{ width: "100%", height: "100%" }}
-        mapStyle="mapbox://styles/mapbox/streets-v12"
+        mapStyle={
+          mapTheme === "dark"
+            ? "mapbox://styles/mapbox/dark-v11"
+            : "mapbox://styles/mapbox/streets-v12"
+        }
         mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
       >
         <NavigationControl position="bottom-right" />
 
-        {/* All bus routes layer — only checked routes are rendered */}
+        {/* Global route catalog */}
         {anyRouteVisible && (
           <AllRoutesLayer routes={allRoutes} visibleRouteIds={visibleRouteIds} />
         )}
 
-        {/* Bus route polyline (with official company color) */}
-        {routeMatch && (
-          <RouteLayer
-            coordinates={routeMatch.busPath}
-            color={getRouteColor(routeMatch.routeId)}
-          />
-        )}
+        {/* Bus legs for current option — each with unique id and layer id */}
+        {selectedOption &&
+          selectedOption.legs.map((leg, i) => (
+            <RouteLayer
+              key={`bus-leg-${selectedOption.id}-${leg.routeId}-${i}`}
+              id={`bus-${selectedOption.id}-${leg.routeId}-${i}`}
+              coordinates={leg.busPath}
+              color={getRouteColor(leg.routeId)}
+            />
+          ))}
 
-        {/* Walking: user origin → boarding point (road-following dashed line) */}
-        {walkToStartCoords.length >= 2 && (
-          <WalkingLayer id="to-start" coordinates={walkToStartCoords} />
-        )}
+        {/* Walking paths (street matched) */}
+        {walkingLegs.map((w) => (
+          <WalkingLayer key={w.id} id={w.id} coordinates={w.coords} />
+        ))}
 
-        {/* Walking: alighting point → user destination (road-following dashed line) */}
-        {walkFromEndCoords.length >= 2 && (
-          <WalkingLayer id="from-end" coordinates={walkFromEndCoords} />
-        )}
-
-        {/* Markers for origin, destination, boarding & alighting */}
-        {routeMatch && (
-          <SnapMarkers
-            origin={routeMatch.walkToStart.from}
-            destination={routeMatch.walkFromEnd.to}
-            boardingPoint={routeMatch.startNode.point}
-            alightingPoint={routeMatch.endNode.point}
-          />
-        )}
+        {/* Markers */}
+        <SnapMarkers markers={markers} />
       </Map>
 
-      {/* ── Floating legend button (bottom-right, above nav control) ────── */}
+      {/* Floating Theme Toggle (Dark / Light) */}
+      <button
+        onClick={() => setMapTheme((t) => (t === "dark" ? "streets" : "dark"))}
+        title={mapTheme === "dark" ? "Switch to Streets map" : "Switch to Dark map"}
+        style={{
+          position: "absolute",
+          bottom: 142,
+          right: 16,
+          zIndex: 10,
+          width: 44,
+          height: 44,
+          borderRadius: "50%",
+          background: mapTheme === "dark" ? "#1e293b" : "white",
+          color: mapTheme === "dark" ? "#f8fafc" : "#1e293b",
+          border: "none",
+          boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 20,
+        }}
+      >
+        {mapTheme === "dark" ? "🌙" : "☀️"}
+      </button>
+
+      {/* Floating legend button */}
       <button
         onClick={handleOpenLegend}
         title="Map Legend"
@@ -222,7 +350,8 @@ export default function HomePage() {
           width: 44,
           height: 44,
           borderRadius: "50%",
-          background: "white",
+          background: mapTheme === "dark" ? "#1e293b" : "white",
+          color: mapTheme === "dark" ? "#f8fafc" : "#1e293b",
           border: "none",
           boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
           cursor: "pointer",
@@ -230,21 +359,12 @@ export default function HomePage() {
           alignItems: "center",
           justifyContent: "center",
           fontSize: 20,
-          transition: "box-shadow 0.2s, transform 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.boxShadow = "0 4px 20px rgba(0,0,0,0.32)";
-          e.currentTarget.style.transform = "scale(1.08)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.22)";
-          e.currentTarget.style.transform = "scale(1)";
         }}
       >
         🗺️
       </button>
 
-      {/* ── Legend sheet ─────────────────────────────────────────────────── */}
+      {/* Legend sheet */}
       <RouteLegendSheet
         open={legendOpen}
         onOpenChange={setLegendOpen}
@@ -252,183 +372,585 @@ export default function HomePage() {
         loading={loadingRoutes}
         visibleRouteIds={visibleRouteIds}
         onToggleRoute={handleToggleRoute}
+        dark={mapTheme === "dark"}
       />
 
-      {/* ── Search panel (top-center) ─────────────────────────────────────── */}
+      {/* ── Collapsed Floating Summary Pill ─────────────────────── */}
+      {isCollapsed && options.length > 0 && selectedOption && (
+        <div
+          onClick={() => setIsCollapsed(false)}
+          title="Click to expand full route details"
+          style={{
+            position: "absolute",
+            top: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.95)",
+            backdropFilter: "blur(8px)",
+            color: isDark ? "#f8fafc" : "#0f172a",
+            border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+            padding: "8px 16px",
+            borderRadius: "32px",
+            boxShadow: isDark ? "0 10px 30px rgba(0,0,0,0.6)" : "0 6px 24px rgba(0,0,0,0.18)",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            zIndex: 10,
+            cursor: "pointer",
+            maxWidth: "92vw",
+            transition: "all 0.2s ease-in-out",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "13px", fontWeight: 700 }}>
+            <span style={{ fontSize: "16px" }}>🚌</span>
+            <span>
+              {selectedOption.type === "direct"
+                ? `Bus ${selectedOption.legs[0].routeId}`
+                : `${selectedOption.legs[0].routeId} ➔ ${selectedOption.legs[1].routeId}`}
+            </span>
+          </div>
+
+          <span
+            style={{
+              fontSize: "11px",
+              color: isDark ? "#94a3b8" : "#64748b",
+              borderLeft: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+              paddingLeft: "10px",
+            }}
+          >
+            {fmtDist(selectedOption.totalBusDistanceM)} bus • {fmtDist(selectedOption.totalWalkDistanceM)} walk
+          </span>
+
+          {selectedOption.isHighWalk && (
+            <span
+              style={{
+                fontSize: 10,
+                background: isDark ? "#451a03" : "#fef3c7",
+                color: isDark ? "#fbbf24" : "#b45309",
+                padding: "2px 6px",
+                borderRadius: 4,
+                fontWeight: 700,
+              }}
+            >
+              ⚠️ High Walk
+            </span>
+          )}
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsCollapsed(false);
+            }}
+            style={{
+              padding: "5px 12px",
+              borderRadius: "20px",
+              background: "#2563eb",
+              color: "white",
+              border: "none",
+              fontSize: "11px",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            Show Details ▲
+          </button>
+        </div>
+      )}
+
+      {/* ── Search & Results Panel ──────────────────────────────── */}
       <div
         style={{
           position: "absolute",
           top: 20,
           left: "50%",
           transform: "translateX(-50%)",
-          background: "white",
+          background: isDark ? "rgba(15, 23, 42, 0.95)" : "white",
+          backdropFilter: "blur(12px)",
+          color: isDark ? "#f8fafc" : "#0f172a",
           padding: "16px",
-          borderRadius: "12px",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-          display: "flex",
+          borderRadius: "14px",
+          boxShadow: isDark
+            ? "0 10px 40px rgba(0,0,0,0.6)"
+            : "0 4px 24px rgba(0,0,0,0.18)",
+          border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+          display: isCollapsed ? "none" : "flex",
           flexDirection: "column",
           gap: "10px",
-          width: "360px",
+          width: "410px",
+          maxWidth: "92vw",
           zIndex: 10,
+          overflow: "visible",
         }}
       >
-        <SearchInput
-          key={`origin-${searchKey}`}
-          placeholder="Starting point"
-          onSelect={(_, coords) => setOriginCoords(coords)}
-          onClear={() => setOriginCoords(null)}
-        />
-        <SearchInput
-          key={`dest-${searchKey}`}
-          placeholder="Destination"
-          onSelect={(_, coords) => setDestCoords(coords)}
-          onClear={() => setDestCoords(null)}
-        />
-
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
+        {/* Header with Title & Collapse Button */}
+        <div
           style={{
-            padding: "10px",
-            borderRadius: "8px",
-            background: "#1a73e8",
-            color: "white",
-            border: "none",
-            cursor: "pointer",
-            fontWeight: 600,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            paddingBottom: "2px",
           }}
         >
-          {loading ? "Finding route..." : "Get Route"}
-        </button>
-
-        {/* Reset button — only visible when a result is showing */}
-        {routeMatch && (
-          <button
-            onClick={handleReset}
+          <div
             style={{
-              padding: "8px 10px",
-              borderRadius: "8px",
-              background: "transparent",
-              color: "#6b7280",
-              border: "1px solid #d1d5db",
-              cursor: "pointer",
-              fontWeight: 500,
-              fontSize: "13px",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              gap: "6px",
+              gap: 6,
+              fontWeight: 700,
+              fontSize: "14px",
+              color: isDark ? "#f8fafc" : "#0f172a",
             }}
           >
-            ✕ Clear &amp; start over
-          </button>
-        )}
+            <span style={{ fontSize: "16px" }}>🚌</span> BusGraph Karachi
+          </div>
 
-        {error && (
-          <p style={{ color: "red", fontSize: "13px", margin: 0 }}>{error}</p>
-        )}
-
-        {/* Route info card */}
-        {routeMatch && (() => {
-          // Compute bus path distance from coordinate pairs (haversine approximation)
-          const toRad = (d: number) => (d * Math.PI) / 180;
-          let busDistM = 0;
-          for (let i = 1; i < routeMatch.busPath.length; i++) {
-            const [lng1, lat1] = routeMatch.busPath[i - 1];
-            const [lng2, lat2] = routeMatch.busPath[i];
-            const dLat = toRad(lat2 - lat1);
-            const dLng = toRad(lng2 - lng1);
-            const a =
-              Math.sin(dLat / 2) ** 2 +
-              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-            busDistM += 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          }
-
-          const fmtDist = (m: number) =>
-            m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(2)}km`;
-
-          const fmtWalk = (distM: number, durationSec?: number) => {
-            const mins = Math.max(1, Math.round((durationSec ?? (distM / 1.33)) / 60));
-            return `~${mins} min${mins === 1 ? "" : "s"} (${fmtDist(distM)})`;
-          };
-
-          const toStartDist = walkToStartInfo?.distance ?? routeMatch.startNode.distance;
-          const toStartDuration = walkToStartInfo?.duration;
-
-          const fromEndDist = walkFromEndInfo?.distance ?? routeMatch.endNode.distance;
-          const fromEndDuration = walkFromEndInfo?.duration;
-
-          const totalWalkDist = toStartDist + fromEndDist;
-          const totalWalkDuration =
-            (toStartDuration ?? (toStartDist / 1.33)) +
-            (fromEndDuration ?? (fromEndDist / 1.33));
-
-          const routeLabel =
-            routeMatch.routeName.match(/\((.+)\)/)?.[1] ||
-            routeMatch.routeName;
-          const routeColor = getRouteColor(routeMatch.routeId);
-
-          return (
-            <div
+          {options.length > 0 && (
+            <button
+              onClick={() => setIsCollapsed(true)}
+              title="Collapse panel to view full map"
               style={{
-                marginTop: "4px",
-                padding: "12px 14px",
-                background: "#f0f7ff",
-                borderRadius: "10px",
-                fontSize: "13px",
-                lineHeight: "1.7",
-                border: "1px solid #d0e3ff",
+                background: isDark ? "#1e293b" : "#f1f5f9",
+                border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+                color: isDark ? "#94a3b8" : "#475569",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                fontSize: "11px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              {/* Walk to boarding point */}
-              <div style={{ color: "#374151" }}>
-                🚶 Walk <strong>{fmtWalk(toStartDist, toStartDuration)}</strong> to board
-              </div>
+              View Map 🗺️ ▼
+            </button>
+          )}
+        </div>
 
-              {/* Bus segment */}
+        {/* Origin Search Input (higher z-index so dropdown floats over destination) */}
+        <div style={{ position: "relative", zIndex: 30 }}>
+          <SearchInput
+            key={`origin-${searchKey}`}
+            placeholder="Starting point"
+            initialValue={originName}
+            onSelect={(name, coords) => {
+              setOriginCoords(coords);
+              setOriginName(name);
+            }}
+            onClear={() => {
+              setOriginCoords(null);
+              setOriginName("");
+            }}
+            dark={isDark}
+          />
+        </div>
+
+        {/* Destination Search Input (zIndex 20 so it floats over buttons) */}
+        <div style={{ position: "relative", zIndex: 20 }}>
+          <SearchInput
+            key={`dest-${searchKey}`}
+            placeholder="Destination"
+            initialValue={destName}
+            onSelect={(name, coords) => {
+              setDestCoords(coords);
+              setDestName(name);
+            }}
+            onClear={() => {
+              setDestCoords(null);
+              setDestName("");
+            }}
+            dark={isDark}
+          />
+        </div>
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            style={{
+              padding: "10px",
+              borderRadius: "8px",
+              background: "#2563eb",
+              color: "white",
+              border: "none",
+              cursor: "pointer",
+              fontWeight: 600,
+              fontSize: "14px",
+            }}
+          >
+            {loading ? "Searching best routes..." : "Find Routes"}
+          </button>
+
+          {options.length > 0 && (
+            <button
+              onClick={handleReset}
+              style={{
+                padding: "7px 10px",
+                borderRadius: "8px",
+                background: "transparent",
+                color: isDark ? "#94a3b8" : "#6b7280",
+                border: isDark ? "1px solid #334155" : "1px solid #d1d5db",
+                cursor: "pointer",
+                fontWeight: 500,
+                fontSize: "12px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+              }}
+            >
+              ✕ Clear &amp; Start Over
+            </button>
+          )}
+
+          {error && (
+            <p style={{ color: "#ef4444", fontSize: "13px", margin: 0 }}>{error}</p>
+          )}
+
+          {/* ── Multiple Route Options Selector ─────────────────────── */}
+          {options.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
               <div
                 style={{
-                  fontWeight: 600,
-                  color: routeColor,
-                  borderLeft: `3px solid ${routeColor}`,
-                  paddingLeft: "8px",
-                  margin: "6px 0",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: isDark ? "#94a3b8" : "#4b5563",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
                 }}
               >
-                🚌 {routeMatch.routeId} — {routeLabel}
-                <span
-                  style={{ fontWeight: 400, color: "#666", marginLeft: "6px" }}
-                >
-                  ({fmtDist(busDistM)})
-                </span>
+                Suggested Route Options ({options.length}):
               </div>
-
-              {/* Walk to destination */}
-              <div style={{ color: "#374151" }}>
-                🚶 Walk <strong>{fmtWalk(fromEndDist, fromEndDuration)}</strong> to destination
-              </div>
-
-              {/* Total walking summary pill */}
               <div
                 style={{
-                  marginTop: "8px",
-                  paddingTop: "6px",
-                  borderTop: "1px dashed #c3dafe",
-                  fontSize: "11px",
-                  color: "#6b7280",
                   display: "flex",
-                  justifyContent: "space-between",
+                  gap: 6,
+                  overflowX: "auto",
+                  paddingBottom: 4,
+                  scrollbarWidth: "thin",
+                  scrollbarColor: isDark ? "#334155 transparent" : "#cbd5e1 transparent",
                 }}
               >
-                <span>Total walking:</span>
-                <span style={{ fontWeight: 600, color: "#1f2937" }}>
-                  {fmtWalk(totalWalkDist, totalWalkDuration)}
-                </span>
+                {options.map((opt, idx) => {
+                  const isSelected = opt.id === selectedOptionId;
+                  const isTransfer = opt.type === "transfer";
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => handleSelectOption(opt.id)}
+                      style={{
+                        flex: "1 0 auto",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: isSelected
+                          ? "2px solid #3b82f6"
+                          : isDark
+                          ? "1px solid #334155"
+                          : "1px solid #e5e7eb",
+                        background: isSelected
+                          ? isDark
+                            ? "#1e3a8a"
+                            : "#eff6ff"
+                          : isDark
+                          ? "#1e293b"
+                          : "#f9fafb",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        minWidth: 110,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 4,
+                          color: isSelected
+                            ? isDark
+                              ? "#93c5fd"
+                              : "#1a73e8"
+                            : isDark
+                            ? "#94a3b8"
+                            : "#374151",
+                        }}
+                      >
+                        <span>Option {idx + 1}</span>
+                        {opt.isHighWalk && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              background: isDark ? "#451a03" : "#fef3c7",
+                              color: isDark ? "#fbbf24" : "#b45309",
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              fontWeight: 700,
+                            }}
+                          >
+                            High Walk
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: isDark ? "#f8fafc" : "#111827",
+                          marginTop: 2,
+                        }}
+                      >
+                        {isTransfer
+                          ? `${opt.legs[0].routeId} ➔ ${opt.legs[1].routeId}`
+                          : opt.legs[0].routeId}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: isDark ? "#94a3b8" : "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        {fmtDist(opt.totalWalkDistanceM)} walk
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          );
-        })()}
+          )}
+
+          {/* ── Selected Option Step-by-Step Card ────────────────────── */}
+          {selectedOption && (() => {
+            const walkStartLeg = walkingLegs.find((w) => w.id === "walk-start");
+            const walkEndLeg = walkingLegs.find((w) => w.id === "walk-end");
+
+            return (
+              <div
+                style={{
+                  marginTop: "4px",
+                  padding: "14px",
+                  background: isDark ? "#0b1329" : "#f8fafc",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  lineHeight: "1.6",
+                  border: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                  maxHeight: "50vh",
+                  overflowY: "auto",
+                  scrollbarWidth: "thin",
+                  scrollbarColor: isDark ? "#334155 transparent" : "#cbd5e1 transparent",
+                }}
+              >
+                {/* Option Header */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderBottom: isDark ? "1px solid #1e293b" : "1px solid #e2e8f0",
+                    paddingBottom: 8,
+                    marginBottom: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      color: isDark ? "#f8fafc" : "#1e293b",
+                      fontSize: "14px",
+                    }}
+                  >
+                    {selectedOption.type === "direct" ? "Direct Journey" : "Transfer Journey"}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      background:
+                        selectedOption.type === "direct"
+                          ? isDark
+                            ? "#064e3b"
+                            : "#dcfce7"
+                          : isDark
+                          ? "#3b0764"
+                          : "#f3e8ff",
+                      color:
+                        selectedOption.type === "direct"
+                          ? isDark
+                            ? "#6ee7b7"
+                            : "#166534"
+                          : isDark
+                          ? "#d8b4fe"
+                          : "#6b21a8",
+                      padding: "2px 8px",
+                      borderRadius: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {selectedOption.type === "direct" ? "1 Bus" : "2 Buses (1 Switch)"}
+                  </span>
+                </div>
+
+                {/* Step 1: Walk to first boarding stop with explicit stop name */}
+                <div style={{ padding: "6px 0", color: isDark ? "#cbd5e1" : "#334155" }}>
+                  🚶 Walk{" "}
+                  <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
+                    {fmtWalk(
+                      walkStartLeg?.distanceM ?? selectedOption.walkToStart.distanceM,
+                      walkStartLeg?.durationSec
+                    )}
+                  </strong>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: isDark ? "#2dd4bf" : "#0f766e",
+                      fontWeight: 600,
+                      marginTop: 2,
+                      paddingLeft: "18px",
+                    }}
+                  >
+                    📍 Boarding Stop: {selectedOption.legs[0].boardStopName}
+                  </div>
+                </div>
+
+                {/* Legs display with explicit boarding and alighting/switch stops */}
+                {selectedOption.legs.map((leg, i) => {
+                  const legColor = getRouteColor(leg.routeId);
+                  const transferLeg = walkingLegs.find((w) => w.id === `walk-transfer-${i}`);
+                  const isLastLeg = i === selectedOption.legs.length - 1;
+
+                  return (
+                    <div key={`opt-leg-${i}`} style={{ margin: "4px 0" }}>
+                      {/* Bus Ride segment */}
+                      <div
+                        style={{
+                          padding: "8px 10px",
+                          background: isDark ? "#1e293b" : "white",
+                          borderRadius: "8px",
+                          border: isDark ? "1px solid #334155" : "none",
+                          borderLeftWidth: "4px",
+                          borderLeftStyle: "solid",
+                          borderLeftColor: legColor,
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                          margin: "4px 0",
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: legColor, fontSize: "13px" }}>
+                          🚌 Ride {leg.routeId} ({fmtDist(leg.rideDistanceM)})
+                        </div>
+                        <div style={{ fontSize: "11px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                          {leg.routeName}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: isDark ? "#cbd5e1" : "#475569",
+                            marginTop: "4px",
+                          }}
+                        >
+                          • Board at:{" "}
+                          <strong style={{ color: isDark ? "#f8fafc" : "#1e293b" }}>
+                            {leg.boardStopName}
+                          </strong>
+                        </div>
+                        <div style={{ fontSize: "12px", color: isDark ? "#cbd5e1" : "#475569" }}>
+                          • Alight at:{" "}
+                          <strong style={{ color: isDark ? "#f8fafc" : "#1e293b" }}>
+                            {leg.alightStopName}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* Switch/Transfer Section */}
+                      {!isLastLeg && (
+                        <div
+                          style={{
+                            margin: "8px 0",
+                            padding: "8px 10px",
+                            background: isDark ? "#291e0a" : "#fef3c7",
+                            border: isDark ? "1px solid #78350f" : "1px solid #fde68a",
+                            borderRadius: "8px",
+                            fontSize: "12px",
+                            color: isDark ? "#fef08a" : "#92400e",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                          >
+                            🔄 Switch Buses: {leg.routeId} ➔ {selectedOption.legs[i + 1].routeId}
+                          </div>
+                          <div style={{ marginTop: 2 }}>
+                            • Get off <strong>{leg.routeId}</strong> at:{" "}
+                            <strong>{leg.alightStopName}</strong>
+                          </div>
+                          <div>
+                            • Walk{" "}
+                            {fmtWalk(
+                              transferLeg?.distanceM ?? selectedOption.transfers[i]?.distanceM ?? 0,
+                              transferLeg?.durationSec
+                            )}{" "}
+                            to switch
+                          </div>
+                          <div>
+                            • Catch <strong>{selectedOption.legs[i + 1].routeId}</strong> at:{" "}
+                            <strong>{selectedOption.legs[i + 1].boardStopName}</strong>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Step Last: Walk to destination with explicit ending stop */}
+                <div style={{ padding: "6px 0", color: isDark ? "#cbd5e1" : "#334155" }}>
+                  🚶 Walk{" "}
+                  <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
+                    {fmtWalk(
+                      walkEndLeg?.distanceM ?? selectedOption.walkFromEnd.distanceM,
+                      walkEndLeg?.durationSec
+                    )}
+                  </strong>{" "}
+                  from{" "}
+                  <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
+                    {selectedOption.legs[selectedOption.legs.length - 1].alightStopName}
+                  </strong>{" "}
+                  to your final destination
+                </div>
+
+                {/* Totals footer */}
+                <div
+                  style={{
+                    marginTop: "10px",
+                    paddingTop: "8px",
+                    borderTop: isDark ? "1px dashed #334155" : "1px dashed #cbd5e1",
+                    fontSize: "11px",
+                    color: isDark ? "#94a3b8" : "#64748b",
+                    display: "flex",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>
+                    Total Walking:{" "}
+                    <strong style={{ color: isDark ? "#f8fafc" : "#1e293b" }}>
+                      {fmtDist(selectedOption.totalWalkDistanceM)}
+                    </strong>
+                  </span>
+                  <span>
+                    Total Bus Ride:{" "}
+                    <strong style={{ color: isDark ? "#f8fafc" : "#1e293b" }}>
+                      {fmtDist(selectedOption.totalBusDistanceM)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }

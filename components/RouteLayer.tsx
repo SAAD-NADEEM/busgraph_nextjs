@@ -1,13 +1,19 @@
 "use client";
 import { Source, Layer } from "react-map-gl/mapbox";
 
-export default function RouteLayer({
-  coordinates,
-  color = "#1a73e8",
-}: {
+interface RouteLayerProps {
+  id?: string;
   coordinates: [number, number][];
   color?: string;
-}) {
+}
+
+export default function RouteLayer({
+  id = "route",
+  coordinates,
+  color = "#1a73e8",
+}: RouteLayerProps) {
+  if (!coordinates || coordinates.length < 2) return null;
+
   const startCoord = coordinates[0];
   const endCoord = coordinates[coordinates.length - 1];
 
@@ -53,40 +59,40 @@ export default function RouteLayer({
   };
 
   return (
-    <Source id="route" type="geojson" data={geojson}>
-      {/* White casing underneath */}
+    <Source id={`source-${id}`} type="geojson" data={geojson}>
+      {/* White casing underneath for high visibility */}
       <Layer
-        id="route-casing"
+        id={`layer-casing-${id}`}
         type="line"
         filter={["==", ["get", "kind"], "line"]}
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
           "line-color": "#ffffff",
-          "line-width": 10,
+          "line-width": 8,
           "line-opacity": 1,
         }}
       />
-      {/* Colored route line on top */}
+      {/* Route line */}
       <Layer
-        id="route-line"
+        id={`layer-line-${id}`}
         type="line"
         filter={["==", ["get", "kind"], "line"]}
         layout={{ "line-join": "round", "line-cap": "round" }}
         paint={{
           "line-color": color,
-          "line-width": 6,
-          "line-opacity": 1,
+          "line-width": 5,
+          "line-opacity": 0.95,
         }}
       />
-      {/* Terminal circles at each end */}
+      {/* Endpoints */}
       <Layer
-        id="route-endpoints"
+        id={`layer-endpoints-${id}`}
         type="circle"
         filter={["==", ["get", "kind"], "endpoint"]}
         paint={{
-          "circle-radius": 7,
+          "circle-radius": 6,
           "circle-color": color,
-          "circle-stroke-width": 3,
+          "circle-stroke-width": 2.5,
           "circle-stroke-color": "#ffffff",
           "circle-opacity": 1,
         }}
