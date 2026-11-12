@@ -1,17 +1,14 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import { ChevronDown, ChevronUp, Menu, Sun, Moon } from "lucide-react";
 import Map, { NavigationControl } from "react-map-gl/mapbox";
 import RouteLayer from "@/components/RouteLayer";
 import WalkingLayer from "@/components/WalkingLayer";
 import SnapMarkers, { MarkerPoint } from "@/components/SnapMarkers";
 import LiveBusMarkers from "@/components/LiveBusMarkers";
-import LiveTrackerSheet from "@/components/LiveTrackerSheet";
-import StudentDashboardSheet from "@/components/StudentDashboardSheet";
-import RewardsWalletSheet from "@/components/RewardsWalletSheet";
-import RouteChatSheet from "@/components/RouteChatSheet";
+import SideMenuSheet, { MenuTab } from "@/components/SideMenuSheet";
 import SearchInput from "@/components/SearchInput";
 import AllRoutesLayer, { RouteData } from "@/components/AllRoutesLayer";
-import RouteLegendSheet from "@/components/RouteLegendSheet";
 import { getRouteColor } from "@/lib/routeColors";
 import { getWalkingRoute } from "@/utils/walkingRoute";
 import type { TransitOption } from "@/lib/routeMatcher";
@@ -43,8 +40,9 @@ export default function HomePage() {
   // Walking paths cache for selected option
   const [walkingLegs, setWalkingLegs] = useState<WalkingLegState[]>([]);
 
-  // Legend sheet state
-  const [legendOpen, setLegendOpen] = useState(false);
+  // Side Menu & Tabs state
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuTab, setMenuTab] = useState<MenuTab>("legend");
   const [allRoutes, setAllRoutes] = useState<RouteData[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
   const [visibleRouteIds, setVisibleRouteIds] = useState<Set<string>>(new Set());
@@ -54,15 +52,25 @@ export default function HomePage() {
   const [searchKey, setSearchKey] = useState(0);
   const [mapTheme, setMapTheme] = useState<"dark" | "streets">("dark");
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [trackerOpen, setTrackerOpen] = useState(false);
-  const [dashboardOpen, setDashboardOpen] = useState(false);
-  const [rewardsOpen, setRewardsOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [commuteState, setCommuteState] = useState<CommuteDemoState | null>(null);
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
     setCommuteState(getCommuteSnapshot());
+
+    // Load all routes on initial mount so all bus lines are drawn immediately
+    setLoadingRoutes(true);
+    fetch("/api/all-routes")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: RouteData[]) => {
+        if (data.length > 0) {
+          setAllRoutes(data);
+          setVisibleRouteIds(new Set(data.map((r) => r.routeId)));
+        }
+      })
+      .catch((err) => console.error("Failed to load all routes on mount:", err))
+      .finally(() => setLoadingRoutes(false));
+
     return subscribeCommuteStore(() => {
       setCommuteState(getCommuteSnapshot());
     });
@@ -75,22 +83,21 @@ export default function HomePage() {
     options.find((o) => o.id === selectedOptionId) || options[0] || null;
   const isDark = mapTheme === "dark";
 
-  const handleOpenLegend = async () => {
-    setLegendOpen(true);
-    if (allRoutes.length === 0) {
+  const handleOpenMenuTab = (tab: MenuTab = "legend") => {
+    setMenuTab(tab);
+    setMenuOpen(true);
+    if (tab === "legend" && allRoutes.length === 0) {
       setLoadingRoutes(true);
-      try {
-        const res = await fetch("/api/all-routes");
-        if (res.ok) {
-          const data: RouteData[] = await res.json();
-          setAllRoutes(data);
-          setVisibleRouteIds(new Set(data.map((r) => r.routeId)));
-        }
-      } catch (err) {
-        console.error("Failed to load all routes:", err);
-      } finally {
-        setLoadingRoutes(false);
-      }
+      fetch("/api/all-routes")
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: RouteData[]) => {
+          if (data.length > 0) {
+            setAllRoutes(data);
+            setVisibleRouteIds(new Set(data.map((r) => r.routeId)));
+          }
+        })
+        .catch((err) => console.error("Failed to load all routes:", err))
+        .finally(() => setLoadingRoutes(false));
     }
   };
 
@@ -288,7 +295,8 @@ export default function HomePage() {
     });
   }
 
-  const anyRouteVisible = visibleRouteIds.size > 0 && allRoutes.length > 0;
+  const anyRouteVisible =
+    !selectedOption && visibleRouteIds.size > 0 && allRoutes.length > 0;
 
   const FEEDER_THRESHOLD_M = 1800;
 
@@ -306,7 +314,7 @@ export default function HomePage() {
     if (distM <= FEEDER_THRESHOLD_M) {
       return (
         <>
-          🚶 Walk{" "}
+          Walk{" "}
           <strong style={{ color: strongColor }}>
             {fmtWalk(distM, durationSec)}
           </strong>
@@ -316,7 +324,7 @@ export default function HomePage() {
     const rickshawMins = Math.max(3, Math.round(distM / 360) + 2);
     return (
       <>
-        🛺 Feeder / Rickshaw or Walk{" "}
+        Feeder / Rickshaw or Walk{" "}
         <strong style={{ color: isDark ? "#fdba74" : "#c2410c" }}>
           ~{rickshawMins} mins rickshaw ({fmtDist(distM)})
         </strong>{" "}
@@ -380,24 +388,24 @@ export default function HomePage() {
           width: 44,
           height: 44,
           borderRadius: "50%",
-          background: mapTheme === "dark" ? "#1e293b" : "white",
-          color: mapTheme === "dark" ? "#f8fafc" : "#1e293b",
-          border: "none",
+          background: isDark ? "#1e293b" : "white",
+          color: isDark ? "#f8fafc" : "#1e293b",
+          border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
           boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
           cursor: "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 20,
         }}
+        aria-label="Toggle map theme"
       >
-        {mapTheme === "dark" ? "🌙" : "☀️"}
+        {mapTheme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </button>
 
-      {/* Floating legend button */}
+      {/* Floating Menu Button (Routes & App Tabs) */}
       <button
-        onClick={handleOpenLegend}
-        title="Map Legend"
+        onClick={() => handleOpenMenuTab("legend")}
+        title="Menu & App Features"
         style={{
           position: "absolute",
           bottom: 90,
@@ -406,169 +414,37 @@ export default function HomePage() {
           width: 44,
           height: 44,
           borderRadius: "50%",
-          background: mapTheme === "dark" ? "#1e293b" : "white",
-          color: mapTheme === "dark" ? "#f8fafc" : "#1e293b",
-          border: "none",
+          background: isDark ? "#1e293b" : "white",
+          color: isDark ? "#f8fafc" : "#1e293b",
+          border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
           boxShadow: "0 2px 12px rgba(0,0,0,0.22)",
           cursor: "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 20,
         }}
+        aria-label="Open menu"
       >
-        🗺️
+        <Menu size={20} />
       </button>
 
-      {/* Legend sheet */}
-      <RouteLegendSheet
-        open={legendOpen}
-        onOpenChange={setLegendOpen}
+      {/* Unified Side Menu with Tabs (Routes, Dashboard, Live Buses, Coins, Route Chat) */}
+      <SideMenuSheet
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        activeTab={menuTab}
+        onTabChange={setMenuTab}
         routes={allRoutes}
-        loading={loadingRoutes}
+        loadingRoutes={loadingRoutes}
         visibleRouteIds={visibleRouteIds}
         onToggleRoute={handleToggleRoute}
-        dark={mapTheme === "dark"}
-      />
-
-      {/* Top-right Student Commute Dock (Steps 1–4: Tracker, Dashboard, Rewards, Chat) */}
-      <div
-        style={{
-          position: "absolute",
-          top: 20,
-          right: 16,
-          zIndex: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-          justifyContent: "flex-end",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setChatOpen(true)}
-          style={{
-            padding: "8px 13px",
-            borderRadius: "999px",
-            border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
-            color: isDark ? "#f8fafc" : "#0f172a",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: "12px",
-            fontWeight: 700,
-          }}
-        >
-          <span>💬</span>
-          <span>Route Chat</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setRewardsOpen(true)}
-          style={{
-            padding: "8px 13px",
-            borderRadius: "999px",
-            border: isDark ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid #fde68a",
-            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
-            color: isDark ? "#fbbf24" : "#b45309",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: "12px",
-            fontWeight: 700,
-          }}
-        >
-          <span>🪙</span>
-          <span>{commuteState?.profile.coinBalance ?? 0} Coins</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setDashboardOpen(true)}
-          style={{
-            padding: "8px 13px",
-            borderRadius: "999px",
-            border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
-            color: isDark ? "#f8fafc" : "#0f172a",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: "12px",
-            fontWeight: 700,
-          }}
-        >
-          <span>📊</span>
-          <span>Dashboard</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setTrackerOpen(true)}
-          style={{
-            padding: "8px 14px",
-            borderRadius: "999px",
-            border: activeBoarding
-              ? "1px solid #4ade80"
-              : isDark
-              ? "1px solid #334155"
-              : "1px solid #e2e8f0",
-            background: activeBoarding
-              ? "#065f46"
-              : isDark
-              ? "rgba(15, 23, 42, 0.94)"
-              : "rgba(255, 255, 255, 0.96)",
-            color: activeBoarding ? "#ecfdf5" : isDark ? "#f8fafc" : "#0f172a",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: "12px",
-            fontWeight: 700,
-          }}
-        >
-          <span>{activeBoarding ? "🟢" : "📡"}</span>
-          <span>
-            {activeBoarding
-              ? `Riding ${activeBoarding.routeId} • Exit`
-              : "I Boarded / Live Buses"}
-          </span>
-          <span
-            style={{
-              background: activeBoarding
-                ? "rgba(255,255,255,0.2)"
-                : isDark
-                ? "#1e293b"
-                : "#f1f5f9",
-              color: activeBoarding ? "#ecfdf5" : "#38bdf8",
-              padding: "2px 7px",
-              borderRadius: "999px",
-              fontSize: "11px",
-              fontWeight: 800,
-            }}
-          >
-            {activeSpottings.length} live
-          </span>
-        </button>
-      </div>
-
-      {/* Live Bus Tracker Sheet */}
-      <LiveTrackerSheet
-        open={trackerOpen}
-        onOpenChange={setTrackerOpen}
+        profile={commuteState?.profile ?? null}
+        trips={commuteState?.trips ?? []}
         activeBoarding={activeBoarding}
         spottings={activeSpottings}
         coinBalance={commuteState?.profile.coinBalance ?? 0}
+        transactions={commuteState?.transactions ?? []}
+        chatMessages={commuteState?.chatMessages ?? []}
         selectedOption={selectedOption}
         onFocusLocation={(lat, lng) => {
           mapRef.current?.flyTo({ center: [lng, lat], zoom: 14, duration: 700 });
@@ -576,130 +452,139 @@ export default function HomePage() {
         dark={isDark}
       />
 
-      {/* Student Commute Dashboard Sheet */}
-      <StudentDashboardSheet
-        open={dashboardOpen}
-        onOpenChange={setDashboardOpen}
-        profile={commuteState?.profile ?? null}
-        trips={commuteState?.trips ?? []}
-        onOpenRewards={() => setRewardsOpen(true)}
-        dark={isDark}
-      />
-
-      {/* Rewards & EasyPaisa Wallet Sheet */}
-      <RewardsWalletSheet
-        open={rewardsOpen}
-        onOpenChange={setRewardsOpen}
-        profile={commuteState?.profile ?? null}
-        transactions={commuteState?.transactions ?? []}
-        dark={isDark}
-      />
-
-      {/* Per-Bus Live Chat Rooms Sheet */}
-      <RouteChatSheet
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        profile={commuteState?.profile ?? null}
-        chatMessages={commuteState?.chatMessages ?? []}
-        activeBoarding={activeBoarding}
-        selectedOption={selectedOption}
-        dark={isDark}
-      />
-
-      {/* ── Collapsed Floating Summary Pill ─────────────────────── */}
-      {isCollapsed && options.length > 0 && selectedOption && (
+      {/* ── Collapsed Floating Summary Panel ─────────────────────── */}
+      {isCollapsed && (
         <div
           onClick={() => setIsCollapsed(false)}
-          title="Click to expand full route details"
+          title="Click to expand search panel"
           style={{
             position: "absolute",
             top: 20,
             left: "50%",
             transform: "translateX(-50%)",
             background: isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.95)",
-            backdropFilter: "blur(8px)",
+            backdropFilter: "blur(12px)",
             color: isDark ? "#f8fafc" : "#0f172a",
             border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
-            padding: "8px 16px",
-            borderRadius: "32px",
-            boxShadow: isDark ? "0 10px 30px rgba(0,0,0,0.6)" : "0 6px 24px rgba(0,0,0,0.18)",
+            padding: "12px 16px",
+            borderRadius: "14px",
+            boxShadow: isDark ? "0 10px 40px rgba(0,0,0,0.6)" : "0 4px 24px rgba(0,0,0,0.18)",
             display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            zIndex: 10,
-            cursor: "pointer",
+            flexDirection: "column",
+            gap: "8px",
+            width: "410px",
             maxWidth: "92vw",
+            zIndex: 40,
+            cursor: "pointer",
             transition: "all 0.2s ease-in-out",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "13px", fontWeight: 700 }}>
-            <span style={{ fontSize: "16px" }}>🚌</span>
-            <span>
-              {selectedOption.type === "direct"
-                ? `Bus ${selectedOption.legs[0].routeId}`
-                : `${selectedOption.legs[0].routeId} ➔ ${selectedOption.legs[1].routeId}`}
-            </span>
+          {/* Header Row: Logo + BusGraph on left, Up Arrow button on right */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              width: "100%",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "14px", fontWeight: 700 }}>
+              <img
+                src="/icons/icon-192x192.png"
+                alt="BusGraph"
+                width={20}
+                height={20}
+                style={{ borderRadius: "4px", objectFit: "contain" }}
+              />
+              <span>BusGraph</span>
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsCollapsed(false);
+              }}
+              title="Expand panel"
+              style={{
+                background: isDark ? "#1e293b" : "#f1f5f9",
+                border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+                color: isDark ? "#94a3b8" : "#475569",
+                padding: "6px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              aria-label="Expand panel"
+            >
+              <ChevronUp size={16} />
+            </button>
           </div>
 
-          <span
-            style={{
-              fontSize: "11px",
-              color: isDark ? "#94a3b8" : "#64748b",
-              borderLeft: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
-              paddingLeft: "10px",
-            }}
-          >
-            {fmtDist(selectedOption.totalBusDistanceM)} bus • {fmtDist(selectedOption.totalWalkDistanceM)} {selectedOption.needsFeeder ? "feeder/walk" : "walk"}
-          </span>
-
-          {(selectedOption.needsFeeder || selectedOption.isHighWalk) && (
-            <span
+          {/* Second Row: Bus Name + Km info in query state, or search text in no-query state */}
+          {selectedOption ? (
+            <div
               style={{
-                fontSize: 10,
-                background: selectedOption.needsFeeder
-                  ? isDark
-                    ? "#431407"
-                    : "#ffedd5"
-                  : isDark
-                  ? "#451a03"
-                  : "#fef3c7",
-                color: selectedOption.needsFeeder
-                  ? isDark
-                    ? "#fdba74"
-                    : "#c2410c"
-                  : isDark
-                  ? "#fbbf24"
-                  : "#b45309",
-                padding: "2px 6px",
-                borderRadius: 4,
-                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                fontSize: "12px",
+                flexWrap: "wrap",
               }}
             >
-              {selectedOption.needsFeeder ? "🛺 Feeder" : "⚠️ High Walk"}
-            </span>
-          )}
+              <span style={{ fontWeight: 600, color: isDark ? "#93c5fd" : "#1d4ed8" }}>
+                {selectedOption.type === "direct"
+                  ? `Bus ${selectedOption.legs[0].routeId}`
+                  : `${selectedOption.legs[0].routeId} ➔ ${selectedOption.legs[1].routeId}`}
+              </span>
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsCollapsed(false);
-            }}
-            style={{
-              padding: "5px 12px",
-              borderRadius: "20px",
-              background: "#2563eb",
-              color: "white",
-              border: "none",
-              fontSize: "11px",
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            Show Details ▲
-          </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: "11px", color: isDark ? "#94a3b8" : "#64748b" }}>
+                  {fmtDist(selectedOption.totalBusDistanceM)} bus • {fmtDist(selectedOption.totalWalkDistanceM)} {selectedOption.needsFeeder ? "feeder/walk" : "walk"}
+                </span>
+
+                {(selectedOption.needsFeeder || selectedOption.isHighWalk) && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      background: selectedOption.needsFeeder
+                        ? isDark
+                          ? "#431407"
+                          : "#ffedd5"
+                        : isDark
+                        ? "#451a03"
+                        : "#fef3c7",
+                      color: selectedOption.needsFeeder
+                        ? isDark
+                          ? "#fdba74"
+                          : "#c2410c"
+                        : isDark
+                        ? "#fbbf24"
+                        : "#b45309",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {selectedOption.needsFeeder ? "Feeder" : "High Walk"}
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                fontSize: "12px",
+                color: isDark ? "#94a3b8" : "#64748b",
+              }}
+            >
+              {originName || destName
+                ? `${originName ? originName.split(",")[0] : "Start"} ➔ ${destName ? destName.split(",")[0] : "Destination"}`
+                : "Search routes across Karachi"}
+            </div>
+          )}
         </div>
       )}
 
@@ -724,7 +609,7 @@ export default function HomePage() {
           gap: "10px",
           width: "410px",
           maxWidth: "92vw",
-          zIndex: 10,
+          zIndex: 40,
           overflow: "visible",
         }}
       >
@@ -741,36 +626,40 @@ export default function HomePage() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 6,
+              gap: 8,
               fontWeight: 700,
               fontSize: "14px",
               color: isDark ? "#f8fafc" : "#0f172a",
             }}
           >
-            <span style={{ fontSize: "16px" }}>🚌</span> BusGraph Karachi
+            <img
+              src="/icons/icon-192x192.png"
+              alt="BusGraph"
+              width={20}
+              height={20}
+              style={{ borderRadius: "4px", objectFit: "contain" }}
+            />
+            <span>BusGraph</span>
           </div>
 
-          {options.length > 0 && (
-            <button
-              onClick={() => setIsCollapsed(true)}
-              title="Collapse panel to view full map"
-              style={{
-                background: isDark ? "#1e293b" : "#f1f5f9",
-                border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
-                color: isDark ? "#94a3b8" : "#475569",
-                padding: "4px 8px",
-                borderRadius: "6px",
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              View Map 🗺️ ▼
-            </button>
-          )}
+          <button
+            onClick={() => setIsCollapsed(true)}
+            title="Collapse panel"
+            style={{
+              background: isDark ? "#1e293b" : "#f1f5f9",
+              border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+              color: isDark ? "#94a3b8" : "#475569",
+              padding: "6px",
+              borderRadius: "6px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            aria-label="Collapse panel"
+          >
+            <ChevronDown size={16} />
+          </button>
         </div>
 
         {/* Origin Search Input (higher z-index so dropdown floats over destination) */}
@@ -945,7 +834,7 @@ export default function HomePage() {
                               fontWeight: 700,
                             }}
                           >
-                            {opt.needsFeeder ? "🛺 Feeder" : "High Walk"}
+                            {opt.needsFeeder ? "Feeder" : "High Walk"}
                           </span>
                         )}
                       </div>
@@ -1061,7 +950,7 @@ export default function HomePage() {
                       paddingLeft: "18px",
                     }}
                   >
-                    📍 Boarding Stop: {selectedOption.legs[0].boardStopName}
+                    Boarding Stop: {selectedOption.legs[0].boardStopName}
                   </div>
                 </div>
 
@@ -1088,7 +977,7 @@ export default function HomePage() {
                         }}
                       >
                         <div style={{ fontWeight: 700, color: legColor, fontSize: "13px" }}>
-                          🚌 Ride {leg.routeId} ({fmtDist(leg.rideDistanceM)})
+                          Ride {leg.routeId} ({fmtDist(leg.rideDistanceM)})
                         </div>
                         <div style={{ fontSize: "11px", color: isDark ? "#94a3b8" : "#64748b" }}>
                           {leg.routeName}
@@ -1134,7 +1023,7 @@ export default function HomePage() {
                               gap: 4,
                             }}
                           >
-                            🔄 Switch Buses: {leg.routeId} ➔ {selectedOption.legs[i + 1].routeId}
+                            Switch Buses: {leg.routeId} ➔ {selectedOption.legs[i + 1].routeId}
                           </div>
                           <div style={{ marginTop: 2 }}>
                             • Get off <strong>{leg.routeId}</strong> at:{" "}
@@ -1200,7 +1089,7 @@ export default function HomePage() {
                 {/* Quick Step-1 Board / Exit CTA tied to active route */}
                 <button
                   type="button"
-                  onClick={() => setTrackerOpen(true)}
+                  onClick={() => handleOpenMenuTab("tracker")}
                   style={{
                     marginTop: "10px",
                     width: "100%",
@@ -1219,13 +1108,13 @@ export default function HomePage() {
                   }}
                 >
                   {activeBoarding
-                    ? `🟢 Riding ${activeBoarding.routeId} — Tap When You Exit (+15 Coins)`
-                    : `🚌 Boarded ${selectedOption.legs[0].routeId}? Broadcast Live Location`}
+                    ? `Riding ${activeBoarding?.routeId} — Tap When You Exit (+15 Coins)`
+                    : `Boarded ${selectedOption.legs[0].routeId}? Broadcast Live Location`}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setChatOpen(true)}
+                  onClick={() => handleOpenMenuTab("chat")}
                   style={{
                     marginTop: "6px",
                     width: "100%",
@@ -1239,7 +1128,7 @@ export default function HomePage() {
                     cursor: "pointer",
                   }}
                 >
-                  💬 Open #{selectedOption.legs[0].routeId}-chat Commuter Channel
+                  Open #{selectedOption.legs[0].routeId}-chat Commuter Channel
                 </button>
               </div>
             );

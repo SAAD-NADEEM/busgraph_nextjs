@@ -31,7 +31,7 @@ import {
 
 const STORAGE_KEY = "busgraph_commute_store_v1";
 const STORE_EVENT = "busgraph:store-updated";
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 
 function makeId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 8);
@@ -299,6 +299,16 @@ function readState(): CommuteDemoState {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
+    // Auto-replenish seed spottings if all spottings have expired
+    const nowMs = Date.now();
+    const hasLive = parsed.spottings?.some(
+      (s) => s.status === "active" && new Date(s.expiresAt).getTime() > nowMs
+    );
+    if (!hasLive) {
+      const freshSeed = createInitialSeedState();
+      parsed.spottings = freshSeed.spottings;
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
     return parsed;
   } catch {
     return createInitialSeedState();
@@ -337,12 +347,25 @@ export function getCommuteSnapshot(): CommuteDemoState {
 
 /**
  * Returns non-expired active bus spottings for rendering on the live map.
+ * Demo seed spottings automatically extend their TTL so pins never vanish during testing.
  */
 export function getActiveBusSpottings(state: CommuteDemoState = readState()): LiveBusSpotting[] {
   const nowMs = Date.now();
-  return state.spottings.filter(
-    (s) => s.status === "active" && new Date(s.expiresAt).getTime() > nowMs
-  );
+  return state.spottings
+    .map((s) => {
+      if (s._id.startsWith("spot-seed-") && new Date(s.expiresAt).getTime() <= nowMs) {
+        return {
+          ...s,
+          spottedAt: new Date(nowMs - 4 * 60_000).toISOString(),
+          expiresAt: new Date(nowMs + 25 * 60_000).toISOString(),
+          status: "active" as const,
+        };
+      }
+      return s;
+    })
+    .filter(
+      (s) => s.status === "active" && new Date(s.expiresAt).getTime() > nowMs
+    );
 }
 
 /**

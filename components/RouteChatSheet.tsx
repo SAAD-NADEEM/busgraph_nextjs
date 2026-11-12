@@ -22,9 +22,7 @@ import {
   StudentProfile,
 } from "@/lib/commuteTypes";
 
-interface RouteChatSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+export interface RouteChatViewProps {
   profile: StudentProfile | null;
   chatMessages: RouteChatMessage[];
   activeBoarding: ActiveBoardingSession | null;
@@ -32,20 +30,13 @@ interface RouteChatSheetProps {
   dark?: boolean;
 }
 
-/**
- * Right-side drawer for Step 4: Isolated Per-Bus Live Chat Rooms (#R11-chat, #EV3-chat).
- * Features 1-tap structured quick-tags (+5 Commute Coins), verified student badges,
- * and free-text commuter updates.
- */
-export default function RouteChatSheet({
-  open,
-  onOpenChange,
+export function RouteChatView({
   profile,
   chatMessages,
   activeBoarding,
   selectedOption,
   dark = true,
-}: RouteChatSheetProps) {
+}: RouteChatViewProps) {
   const defaultRouteId =
     activeBoarding?.routeId || selectedOption?.legs[0]?.routeId || "R11";
 
@@ -63,9 +54,7 @@ export default function RouteChatSheet({
     []
   );
 
-  // Sync default channel & stop when opened during an active ride or route search
   useEffect(() => {
-    if (!open) return;
     const preferred =
       activeBoarding?.routeId || selectedOption?.legs[0]?.routeId;
     if (preferred) {
@@ -76,9 +65,8 @@ export default function RouteChatSheet({
     if (preferredStop) {
       setSelectedStopName(preferredStop);
     }
-  }, [open, activeBoarding, selectedOption]);
+  }, [activeBoarding, selectedOption]);
 
-  // Count messages per channel so active rooms stand out
   const countByRoute = useMemo(() => {
     const map = new Map<string, number>();
     for (const msg of chatMessages) {
@@ -99,10 +87,8 @@ export default function RouteChatSheet({
   );
 
   useEffect(() => {
-    if (open) {
-      feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [channelMessages.length, activeRouteId, open]);
+    feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [channelMessages.length, activeRouteId]);
 
   const submitMessage = (tagType: ChatTagType, message: string) => {
     setErrorMsg("");
@@ -115,7 +101,7 @@ export default function RouteChatSheet({
       });
       if (res.coinsAwarded > 0) {
         setStatusNotice(
-          `+${res.coinsAwarded} 🪙 earned for verified route alert! (Balance: ${res.newBalance})`
+          `+${res.coinsAwarded} coins earned for verified route alert! (Balance: ${res.newBalance})`
         );
       }
       if (tagType === "free") {
@@ -148,6 +134,435 @@ export default function RouteChatSheet({
   const activeRouteColor = getRouteColor(activeRouteId);
 
   return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* ── Isolated Route Channel Tabs (#R11-chat, #EV3-chat) ── */}
+      <div
+        style={{
+          padding: "10px 14px",
+          borderBottom: `1px solid ${borderCol}`,
+          display: "flex",
+          gap: 6,
+          overflowX: "auto",
+          flexShrink: 0,
+        }}
+      >
+        {AVAILABLE_ROUTE_IDS.map((id) => {
+          const isActive = id === activeRouteId;
+          const col = getRouteColor(id);
+          const msgCount = countByRoute.get(id) ?? 0;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setActiveRouteId(id);
+                setStatusNotice("");
+              }}
+              style={{
+                padding: "5px 10px",
+                borderRadius: "999px",
+                border: isActive ? `2px solid ${col}` : `1px solid ${borderCol}`,
+                background: isActive ? `${col}24` : cardBg,
+                color: isActive ? (dark ? "#f8fafc" : "#0f172a") : textSecondary,
+                fontSize: "11px",
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: col,
+                  display: "inline-block",
+                }}
+              />
+              <span>#{id}</span>
+              {msgCount > 0 && (
+                <span
+                  style={{
+                    background: isActive ? col : dark ? "#334155" : "#cbd5e1",
+                    color: "white",
+                    fontSize: "9px",
+                    fontWeight: 800,
+                    padding: "0 5px",
+                    borderRadius: "999px",
+                  }}
+                >
+                  {msgCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Active Channel Header & Stop Picker ───────────── */}
+      <div
+        style={{
+          padding: "10px 14px",
+          background: cardBg,
+          borderBottom: `1px solid ${borderCol}`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span
+              style={{
+                background: activeRouteColor,
+                color: "white",
+                fontSize: "11px",
+                fontWeight: 800,
+                padding: "2px 7px",
+                borderRadius: "999px",
+              }}
+            >
+              {activeRouteId}
+            </span>
+            <span style={{ fontSize: "12px", fontWeight: 700, color: textPrimary }}>
+              #{activeRouteId}-chat
+            </span>
+          </div>
+          <span style={{ fontSize: "10px", color: textSecondary }}>
+            +{COINS_PER_HELPFUL_ALERT} coins per alert
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label style={{ fontSize: "10px", color: textSecondary, fontWeight: 600, flexShrink: 0 }}>
+            Near Stop:
+          </label>
+          <select
+            value={selectedStopName}
+            onChange={(e) => setSelectedStopName(e.target.value)}
+            style={{
+              flex: 1,
+              padding: "5px 8px",
+              borderRadius: "6px",
+              background: innerBg,
+              color: textPrimary,
+              border: `1px solid ${borderCol}`,
+              fontSize: "11px",
+              minWidth: 0,
+            }}
+          >
+            {stopOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Status Notices / Coin Rewards ─────────────────── */}
+      {statusNotice && (
+        <div
+          style={{
+            margin: "8px 14px 0",
+            padding: "7px 10px",
+            borderRadius: "7px",
+            background: "rgba(16, 185, 129, 0.16)",
+            color: dark ? "#34d399" : "#047857",
+            fontSize: "11px",
+            fontWeight: 700,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>{statusNotice}</span>
+          <button
+            type="button"
+            onClick={() => setStatusNotice("")}
+            style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div
+          style={{
+            margin: "8px 14px 0",
+            padding: "7px 10px",
+            borderRadius: "7px",
+            background: "rgba(239, 68, 68, 0.16)",
+            color: "#f87171",
+            fontSize: "11px",
+            fontWeight: 600,
+          }}
+        >
+          {errorMsg}
+        </div>
+      )}
+
+      {/* ── Scrollable Message Feed ──────────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {channelMessages.length === 0 ? (
+          <div
+            style={{
+              margin: "auto",
+              textAlign: "center",
+              color: textSecondary,
+              fontSize: "12px",
+              padding: 20,
+            }}
+          >
+            No alerts posted yet in #{activeRouteId}-chat.
+            <br />
+            Tap a quick alert tag below to share an update (+5 coins)!
+          </div>
+        ) : (
+          channelMessages.map((msg) => {
+            const tagMeta = CHAT_TAG_META[msg.tagType];
+            const isSelf = msg.senderName.includes(profile?.displayName ?? "Hamza");
+            return (
+              <div
+                key={msg._id}
+                style={{
+                  padding: "9px 11px",
+                  borderRadius: "10px",
+                  background: isSelf
+                    ? dark
+                      ? "rgba(37, 99, 235, 0.14)"
+                      : "#eff6ff"
+                    : cardBg,
+                  border: isSelf
+                    ? dark
+                      ? "1px solid rgba(37, 99, 235, 0.35)"
+                      : "1px solid #bfdbfe"
+                    : `1px solid ${borderCol}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "11px" }}>
+                    <span style={{ fontWeight: 700, color: textPrimary }}>
+                      {msg.senderName}
+                    </span>
+                    {msg.verifiedStudent && (
+                      <span
+                        style={{
+                          background: dark ? "rgba(16, 185, 129, 0.18)" : "#d1fae5",
+                          color: dark ? "#34d399" : "#047857",
+                          padding: "0 5px",
+                          borderRadius: "999px",
+                          fontSize: "9px",
+                          fontWeight: 700,
+                        }}
+                      >
+                        ✓ Student
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "10px", color: textSecondary }}>
+                    {formatTimeAgo(msg.createdAt)}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                  <span
+                    style={{
+                      background: dark ? tagMeta.bgDark : tagMeta.bgLight,
+                      color: tagMeta.color,
+                      fontSize: "9px",
+                      fontWeight: 800,
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.4px",
+                    }}
+                  >
+                    {tagMeta.label}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: "12px", color: textPrimary, marginTop: 2, lineHeight: 1.35 }}>
+                  {msg.message}
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={feedEndRef} />
+      </div>
+
+      {/* ── 1-Tap Quick Tag Buttons + Input Bar ───────────── */}
+      <div
+        style={{
+          padding: "10px 14px 12px",
+          background: cardBg,
+          borderTop: `1px solid ${borderCol}`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ fontSize: "10px", fontWeight: 700, color: textSecondary }}>
+          1-TAP STRUCTURED ALERTS (+5 COINS)
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickTag("crossed", `Just crossed ${selectedStopName}`)
+            }
+            style={{
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: `1px solid ${borderCol}`,
+              background: innerBg,
+              color: dark ? "#38bdf8" : "#0284c7",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            Just crossed stop
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickTag("crowd", `Seats available near ${selectedStopName}`)
+            }
+            style={{
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: `1px solid ${borderCol}`,
+              background: innerBg,
+              color: dark ? "#34d399" : "#059669",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            Seats available
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickTag("crowd", `Standing only near ${selectedStopName}`)
+            }
+            style={{
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: `1px solid ${borderCol}`,
+              background: innerBg,
+              color: dark ? "#fbbf24" : "#b45309",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            Standing only
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              handleQuickTag("delay", `Traffic delay near ${selectedStopName}`)
+            }
+            style={{
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: `1px solid ${borderCol}`,
+              background: innerBg,
+              color: dark ? "#fb923c" : "#c2410c",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            Traffic delay
+          </button>
+        </div>
+
+        <form onSubmit={handleSendFreeText} style={{ display: "flex", gap: 6, marginTop: 2 }}>
+          <input
+            type="text"
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            maxLength={240}
+            placeholder={`Message #${activeRouteId}-chat...`}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              borderRadius: "8px",
+              background: innerBg,
+              border: `1px solid ${borderCol}`,
+              color: textPrimary,
+              fontSize: "12px",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!draftText.trim()}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "8px",
+              border: "none",
+              background: !draftText.trim() ? "#475569" : "#2563eb",
+              color: "white",
+              fontSize: "12px",
+              fontWeight: 700,
+              cursor: !draftText.trim() ? "not-allowed" : "pointer",
+            }}
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+interface RouteChatSheetProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  profile: StudentProfile | null;
+  chatMessages: RouteChatMessage[];
+  activeBoarding: ActiveBoardingSession | null;
+  selectedOption: TransitOption | null;
+  dark?: boolean;
+}
+
+export default function RouteChatSheet({
+  open,
+  onOpenChange,
+  profile,
+  chatMessages,
+  activeBoarding,
+  selectedOption,
+  dark = true,
+}: RouteChatSheetProps) {
+  return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -168,7 +583,6 @@ export default function RouteChatSheet({
               dark ? "text-slate-100" : "text-slate-900"
             }`}
           >
-            <span>💬</span>
             Route Commuter Channels
           </SheetTitle>
           <SheetDescription
@@ -194,391 +608,14 @@ export default function RouteChatSheet({
           </SheetDescription>
         </SheetHeader>
 
-        {/* ── Isolated Route Channel Tabs (#R11-chat, #EV3-chat) ── */}
-        <div
-          style={{
-            padding: "10px 14px",
-            borderBottom: `1px solid ${borderCol}`,
-            display: "flex",
-            gap: 6,
-            overflowX: "auto",
-            flexShrink: 0,
-          }}
-        >
-          {AVAILABLE_ROUTE_IDS.map((id) => {
-            const isActive = id === activeRouteId;
-            const col = getRouteColor(id);
-            const msgCount = countByRoute.get(id) ?? 0;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setActiveRouteId(id);
-                  setStatusNotice("");
-                }}
-                style={{
-                  flexShrink: 0,
-                  padding: "6px 10px",
-                  borderRadius: "999px",
-                  border: isActive ? `1px solid ${col}` : `1px solid ${borderCol}`,
-                  background: isActive ? `${col}26` : cardBg,
-                  color: isActive ? textPrimary : textSecondary,
-                  fontSize: "11px",
-                  fontWeight: isActive ? 800 : 600,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: col,
-                    display: "inline-block",
-                  }}
-                />
-                <span>#{id}-chat</span>
-                {msgCount > 0 && (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      opacity: 0.85,
-                      background: innerBg,
-                      padding: "0 5px",
-                      borderRadius: "999px",
-                    }}
-                  >
-                    {msgCount}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ── Channel Banner ───────────────────────────────────── */}
-        <div
-          style={{
-            padding: "8px 16px",
-            background: cardBg,
-            borderBottom: `1px solid ${borderCol}`,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: "11px",
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontWeight: 700, color: textPrimary }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: activeRouteColor,
-                marginRight: 6,
-              }}
-            />
-            #{activeRouteId}-chat
-          </span>
-          <span style={{ color: textSecondary }}>
-            🛡️ Anti-spam &amp; verified IDs active
-          </span>
-        </div>
-
-        {/* ── Scrollable Chat Feed ─────────────────────────────── */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: "12px 14px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-        >
-          {channelMessages.length === 0 ? (
-            <div
-              style={{
-                margin: "auto 0",
-                textAlign: "center",
-                padding: "24px 12px",
-                color: textSecondary,
-                fontSize: "12px",
-              }}
-            >
-              No messages in <strong>#{activeRouteId}-chat</strong> yet.
-              <div style={{ marginTop: 4, fontSize: "11px" }}>
-                Tap a 1-tap quick tag below to report bus location or seat availability and earn +{COINS_PER_HELPFUL_ALERT} 🪙!
-              </div>
-            </div>
-          ) : (
-            channelMessages.map((msg) => {
-              const isSelf = msg.studentId === profile?.studentId;
-              const tagMeta = CHAT_TAG_META[msg.tagType];
-              return (
-                <div
-                  key={msg._id}
-                  style={{
-                    padding: "9px 11px",
-                    borderRadius: "10px",
-                    background: isSelf
-                      ? dark
-                        ? "rgba(37, 99, 235, 0.14)"
-                        : "#eff6ff"
-                      : cardBg,
-                    border: isSelf
-                      ? "1px solid rgba(59, 130, 246, 0.35)"
-                      : `1px solid ${borderCol}`,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 6,
-                      marginBottom: 4,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "11px" }}>
-                      <strong style={{ color: textPrimary }}>
-                        {isSelf ? `${msg.senderName} (You)` : msg.senderName}
-                      </strong>
-                      {msg.verifiedStudent && (
-                        <span
-                          style={{
-                            fontSize: "9px",
-                            fontWeight: 700,
-                            padding: "1px 5px",
-                            borderRadius: "999px",
-                            background: dark ? "rgba(16, 185, 129, 0.16)" : "#d1fae5",
-                            color: dark ? "#34d399" : "#047857",
-                          }}
-                        >
-                          ✓ Verified
-                        </span>
-                      )}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: "9px",
-                        fontWeight: 700,
-                        padding: "1px 6px",
-                        borderRadius: "999px",
-                        color: tagMeta.color,
-                        background: dark ? tagMeta.bgDark : tagMeta.bgLight,
-                      }}
-                    >
-                      {tagMeta.label}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: "12px", color: textPrimary, lineHeight: 1.4 }}>
-                    {msg.message}
-                  </div>
-                  <div style={{ fontSize: "10px", color: textSecondary, marginTop: 4, textAlign: "right" }}>
-                    {formatTimeAgo(msg.createdAt)}
-                  </div>
-                </div>
-              );
-            })
-          )}
-          <div ref={feedEndRef} />
-        </div>
-
-        {/* ── 1-Tap Quick-Tag Composer + Free-Text Input ──────── */}
-        <div
-          style={{
-            padding: "10px 14px 14px",
-            borderTop: `1px solid ${borderCol}`,
-            background: cardBg,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
-          {statusNotice && (
-            <div
-              style={{
-                padding: "6px 9px",
-                borderRadius: "7px",
-                background: dark ? "rgba(16, 185, 129, 0.14)" : "#ecfdf5",
-                color: dark ? "#34d399" : "#047857",
-                fontSize: "11px",
-                fontWeight: 700,
-              }}
-            >
-              {statusNotice}
-            </div>
-          )}
-
-          {errorMsg && (
-            <div
-              style={{
-                padding: "6px 9px",
-                borderRadius: "7px",
-                background: "rgba(239, 68, 68, 0.14)",
-                color: "#f87171",
-                fontSize: "11px",
-                fontWeight: 600,
-              }}
-            >
-              {errorMsg}
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: "10px", fontWeight: 700, color: textSecondary }}>
-              1-TAP QUICK ALERTS (+{COINS_PER_HELPFUL_ALERT} 🪙)
-            </span>
-            <select
-              value={selectedStopName}
-              onChange={(e) => setSelectedStopName(e.target.value)}
-              style={{
-                maxWidth: "185px",
-                padding: "3px 6px",
-                borderRadius: "6px",
-                background: innerBg,
-                border: `1px solid ${borderCol}`,
-                color: textPrimary,
-                fontSize: "11px",
-              }}
-              aria-label="Select stop for quick alert"
-            >
-              {stopOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickTag("crossed", `📍 Bus crossed ${selectedStopName}`)
-              }
-              style={{
-                padding: "6px 8px",
-                borderRadius: "7px",
-                border: `1px solid ${borderCol}`,
-                background: innerBg,
-                color: textPrimary,
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: "pointer",
-                textAlign: "left",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              📍 Crossed stop
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickTag("crowd", `💺 Seats available near ${selectedStopName}`)
-              }
-              style={{
-                padding: "6px 8px",
-                borderRadius: "7px",
-                border: `1px solid ${borderCol}`,
-                background: innerBg,
-                color: dark ? "#34d399" : "#047857",
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              💺 Seats available
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickTag("crowd", `🧍 Standing only near ${selectedStopName}`)
-              }
-              style={{
-                padding: "6px 8px",
-                borderRadius: "7px",
-                border: `1px solid ${borderCol}`,
-                background: innerBg,
-                color: dark ? "#fbbf24" : "#b45309",
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              🧍 Standing only
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickTag("delay", `⚠️ Traffic delay near ${selectedStopName}`)
-              }
-              style={{
-                padding: "6px 8px",
-                borderRadius: "7px",
-                border: `1px solid ${borderCol}`,
-                background: innerBg,
-                color: dark ? "#fb923c" : "#c2410c",
-                fontSize: "11px",
-                fontWeight: 600,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              ⚠️ Traffic delay
-            </button>
-          </div>
-
-          <form onSubmit={handleSendFreeText} style={{ display: "flex", gap: 6, marginTop: 2 }}>
-            <input
-              type="text"
-              value={draftText}
-              onChange={(e) => setDraftText(e.target.value)}
-              maxLength={240}
-              placeholder={`Message #${activeRouteId}-chat...`}
-              style={{
-                flex: 1,
-                padding: "8px 10px",
-                borderRadius: "8px",
-                background: innerBg,
-                border: `1px solid ${borderCol}`,
-                color: textPrimary,
-                fontSize: "12px",
-              }}
-            />
-            <button
-              type="submit"
-              disabled={!draftText.trim()}
-              style={{
-                padding: "8px 14px",
-                borderRadius: "8px",
-                border: "none",
-                background: !draftText.trim() ? "#475569" : "#2563eb",
-                color: "white",
-                fontSize: "12px",
-                fontWeight: 700,
-                cursor: !draftText.trim() ? "not-allowed" : "pointer",
-              }}
-            >
-              Send
-            </button>
-          </form>
-        </div>
+        <RouteChatView
+          profile={profile}
+          chatMessages={chatMessages}
+          activeBoarding={activeBoarding}
+          selectedOption={selectedOption}
+          dark={dark}
+        />
       </SheetContent>
     </Sheet>
   );
 }
-

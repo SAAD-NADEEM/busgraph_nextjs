@@ -18,28 +18,28 @@ export default function SnapMarkers({ markers }: SnapMarkersProps) {
     <>
       {markers.map((m, idx) => {
         let bg = "#1a73e8";
-        let icon = "📍";
+        let label = "•";
         let size = 16;
 
         if (m.type === "origin") {
           bg = "#1a73e8";
-          icon = "🟢";
+          label = "A";
           size = 18;
         } else if (m.type === "destination") {
           bg = "#EA4335";
-          icon = "🏁";
+          label = "B";
           size = 18;
         } else if (m.type === "board") {
           bg = "#0F9D58";
-          icon = "🚌";
+          label = "IN";
           size = 20;
         } else if (m.type === "alight") {
-          bg = "#FBBC04";
-          icon = "🚏";
+          bg = "#d97706";
+          label = "OUT";
           size = 20;
         } else if (m.type === "transfer") {
           bg = "#9333ea";
-          icon = "🔄";
+          label = "➔";
           size = 22;
         }
 
@@ -70,10 +70,12 @@ export default function SnapMarkers({ markers }: SnapMarkersProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: size * 0.55,
+                  fontSize: size * 0.45,
+                  fontWeight: 800,
+                  color: "white",
                 }}
               >
-                {icon}
+                {label}
               </div>
               {m.badge && (
                 <span

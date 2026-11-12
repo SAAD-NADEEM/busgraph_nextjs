@@ -30,7 +30,7 @@ export default function LiveBusMarkers({ spottings, dark = true }: LiveBusMarker
             longitude={spot.lng}
             latitude={spot.lat}
             anchor="center"
-            style={{ zIndex: isOpen ? 30 : spot.isOwnSession ? 20 : 12 }}
+            style={{ zIndex: isOpen ? 15 : spot.isOwnSession ? 10 : 5 }}
           >
             <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
               {/* Interactive detail popover above the live bus marker */}
@@ -48,7 +48,7 @@ export default function LiveBusMarkers({ spottings, dark = true }: LiveBusMarker
                     color: dark ? "#f8fafc" : "#0f172a",
                     boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
                     fontSize: "12px",
-                    zIndex: 50,
+                    zIndex: 20,
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -62,7 +62,7 @@ export default function LiveBusMarkers({ spottings, dark = true }: LiveBusMarker
                         borderRadius: "999px",
                       }}
                     >
-                      🚌 {spot.routeId} Live
+                      {spot.routeId} Live
                     </span>
                     <button
                       onClick={() => setSelectedId(null)}
@@ -81,10 +81,19 @@ export default function LiveBusMarkers({ spottings, dark = true }: LiveBusMarker
                   </div>
 
                   <div style={{ fontWeight: 600, marginBottom: 3, lineHeight: 1.3 }}>
-                    📍 {spot.stopName}
+                    {spot.stopName}
                   </div>
-                  <div style={{ color: crowd.color, fontWeight: 600, fontSize: "11px", marginBottom: 4 }}>
-                    {crowd.emoji} {crowd.label}
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "11px", marginBottom: 4 }}>
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        backgroundColor: crowd.color,
+                        display: "inline-block",
+                      }}
+                    />
+                    <span style={{ color: crowd.color, fontWeight: 600 }}>{crowd.label}</span>
                   </div>
                   <div
                     style={{
@@ -143,7 +152,7 @@ export default function LiveBusMarkers({ spottings, dark = true }: LiveBusMarker
                     pointerEvents: "none",
                   }}
                 />
-                <span style={{ position: "relative" }}>🚌 {spot.routeId}</span>
+                <span style={{ position: "relative" }}>{spot.routeId}</span>
                 {spot.isOwnSession && (
                   <span
                     style={{
