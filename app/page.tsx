@@ -1,15 +1,26 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Map, { NavigationControl } from "react-map-gl/mapbox";
 import RouteLayer from "@/components/RouteLayer";
 import WalkingLayer from "@/components/WalkingLayer";
 import SnapMarkers, { MarkerPoint } from "@/components/SnapMarkers";
+import LiveBusMarkers from "@/components/LiveBusMarkers";
+import LiveTrackerSheet from "@/components/LiveTrackerSheet";
+import StudentDashboardSheet from "@/components/StudentDashboardSheet";
+import RewardsWalletSheet from "@/components/RewardsWalletSheet";
+import RouteChatSheet from "@/components/RouteChatSheet";
 import SearchInput from "@/components/SearchInput";
 import AllRoutesLayer, { RouteData } from "@/components/AllRoutesLayer";
 import RouteLegendSheet from "@/components/RouteLegendSheet";
 import { getRouteColor } from "@/lib/routeColors";
 import { getWalkingRoute } from "@/utils/walkingRoute";
 import type { TransitOption } from "@/lib/routeMatcher";
+import type { CommuteDemoState } from "@/lib/commuteTypes";
+import {
+  getActiveBusSpottings,
+  getCommuteSnapshot,
+  subscribeCommuteStore,
+} from "@/lib/commuteStore";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface WalkingLegState {
@@ -43,7 +54,22 @@ export default function HomePage() {
   const [searchKey, setSearchKey] = useState(0);
   const [mapTheme, setMapTheme] = useState<"dark" | "streets">("dark");
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [trackerOpen, setTrackerOpen] = useState(false);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [rewardsOpen, setRewardsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [commuteState, setCommuteState] = useState<CommuteDemoState | null>(null);
   const mapRef = useRef<any>(null);
+
+  useEffect(() => {
+    setCommuteState(getCommuteSnapshot());
+    return subscribeCommuteStore(() => {
+      setCommuteState(getCommuteSnapshot());
+    });
+  }, []);
+
+  const activeSpottings = commuteState ? getActiveBusSpottings(commuteState) : [];
+  const activeBoarding = commuteState?.activeBoarding ?? null;
 
   const selectedOption =
     options.find((o) => o.id === selectedOptionId) || options[0] || null;
@@ -264,12 +290,41 @@ export default function HomePage() {
 
   const anyRouteVisible = visibleRouteIds.size > 0 && allRoutes.length > 0;
 
+  const FEEDER_THRESHOLD_M = 1800;
+
   const fmtDist = (m: number) =>
     m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(2)}km`;
 
   const fmtWalk = (distM: number, durationSec?: number) => {
     const mins = Math.max(1, Math.round((durationSec ?? distM / 1.33) / 60));
     return `~${mins} min${mins === 1 ? "" : "s"} (${fmtDist(distM)})`;
+  };
+
+  /** Renders first/last-mile mode as walk (<=1.8km) or rickshaw/chingchi feeder (>1.8km). */
+  const renderAccessMode = (distM: number, durationSec?: number) => {
+    const strongColor = isDark ? "#f8fafc" : "#0f172a";
+    if (distM <= FEEDER_THRESHOLD_M) {
+      return (
+        <>
+          🚶 Walk{" "}
+          <strong style={{ color: strongColor }}>
+            {fmtWalk(distM, durationSec)}
+          </strong>
+        </>
+      );
+    }
+    const rickshawMins = Math.max(3, Math.round(distM / 360) + 2);
+    return (
+      <>
+        🛺 Feeder / Rickshaw or Walk{" "}
+        <strong style={{ color: isDark ? "#fdba74" : "#c2410c" }}>
+          ~{rickshawMins} mins rickshaw ({fmtDist(distM)})
+        </strong>{" "}
+        <span style={{ fontSize: "11px", color: isDark ? "#94a3b8" : "#64748b" }}>
+          (or {fmtWalk(distM, durationSec)} walk)
+        </span>
+      </>
+    );
   };
 
   return (
@@ -310,6 +365,7 @@ export default function HomePage() {
 
         {/* Markers */}
         <SnapMarkers markers={markers} />
+        <LiveBusMarkers spottings={activeSpottings} dark={isDark} />
       </Map>
 
       {/* Floating Theme Toggle (Dark / Light) */}
@@ -375,6 +431,181 @@ export default function HomePage() {
         dark={mapTheme === "dark"}
       />
 
+      {/* Top-right Student Commute Dock (Steps 1–4: Tracker, Dashboard, Rewards, Chat) */}
+      <div
+        style={{
+          position: "absolute",
+          top: 20,
+          right: 16,
+          zIndex: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          justifyContent: "flex-end",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setChatOpen(true)}
+          style={{
+            padding: "8px 13px",
+            borderRadius: "999px",
+            border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
+            color: isDark ? "#f8fafc" : "#0f172a",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: "12px",
+            fontWeight: 700,
+          }}
+        >
+          <span>💬</span>
+          <span>Route Chat</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setRewardsOpen(true)}
+          style={{
+            padding: "8px 13px",
+            borderRadius: "999px",
+            border: isDark ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid #fde68a",
+            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
+            color: isDark ? "#fbbf24" : "#b45309",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: "12px",
+            fontWeight: 700,
+          }}
+        >
+          <span>🪙</span>
+          <span>{commuteState?.profile.coinBalance ?? 0} Coins</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setDashboardOpen(true)}
+          style={{
+            padding: "8px 13px",
+            borderRadius: "999px",
+            border: isDark ? "1px solid #334155" : "1px solid #e2e8f0",
+            background: isDark ? "rgba(15, 23, 42, 0.94)" : "rgba(255, 255, 255, 0.96)",
+            color: isDark ? "#f8fafc" : "#0f172a",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: "12px",
+            fontWeight: 700,
+          }}
+        >
+          <span>📊</span>
+          <span>Dashboard</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setTrackerOpen(true)}
+          style={{
+            padding: "8px 14px",
+            borderRadius: "999px",
+            border: activeBoarding
+              ? "1px solid #4ade80"
+              : isDark
+              ? "1px solid #334155"
+              : "1px solid #e2e8f0",
+            background: activeBoarding
+              ? "#065f46"
+              : isDark
+              ? "rgba(15, 23, 42, 0.94)"
+              : "rgba(255, 255, 255, 0.96)",
+            color: activeBoarding ? "#ecfdf5" : isDark ? "#f8fafc" : "#0f172a",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: "12px",
+            fontWeight: 700,
+          }}
+        >
+          <span>{activeBoarding ? "🟢" : "📡"}</span>
+          <span>
+            {activeBoarding
+              ? `Riding ${activeBoarding.routeId} • Exit`
+              : "I Boarded / Live Buses"}
+          </span>
+          <span
+            style={{
+              background: activeBoarding
+                ? "rgba(255,255,255,0.2)"
+                : isDark
+                ? "#1e293b"
+                : "#f1f5f9",
+              color: activeBoarding ? "#ecfdf5" : "#38bdf8",
+              padding: "2px 7px",
+              borderRadius: "999px",
+              fontSize: "11px",
+              fontWeight: 800,
+            }}
+          >
+            {activeSpottings.length} live
+          </span>
+        </button>
+      </div>
+
+      {/* Live Bus Tracker Sheet */}
+      <LiveTrackerSheet
+        open={trackerOpen}
+        onOpenChange={setTrackerOpen}
+        activeBoarding={activeBoarding}
+        spottings={activeSpottings}
+        coinBalance={commuteState?.profile.coinBalance ?? 0}
+        selectedOption={selectedOption}
+        onFocusLocation={(lat, lng) => {
+          mapRef.current?.flyTo({ center: [lng, lat], zoom: 14, duration: 700 });
+        }}
+        dark={isDark}
+      />
+
+      {/* Student Commute Dashboard Sheet */}
+      <StudentDashboardSheet
+        open={dashboardOpen}
+        onOpenChange={setDashboardOpen}
+        profile={commuteState?.profile ?? null}
+        trips={commuteState?.trips ?? []}
+        onOpenRewards={() => setRewardsOpen(true)}
+        dark={isDark}
+      />
+
+      {/* Rewards & EasyPaisa Wallet Sheet */}
+      <RewardsWalletSheet
+        open={rewardsOpen}
+        onOpenChange={setRewardsOpen}
+        profile={commuteState?.profile ?? null}
+        transactions={commuteState?.transactions ?? []}
+        dark={isDark}
+      />
+
+      {/* Per-Bus Live Chat Rooms Sheet */}
+      <RouteChatSheet
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        profile={commuteState?.profile ?? null}
+        chatMessages={commuteState?.chatMessages ?? []}
+        activeBoarding={activeBoarding}
+        selectedOption={selectedOption}
+        dark={isDark}
+      />
+
       {/* ── Collapsed Floating Summary Pill ─────────────────────── */}
       {isCollapsed && options.length > 0 && selectedOption && (
         <div
@@ -418,21 +649,33 @@ export default function HomePage() {
               paddingLeft: "10px",
             }}
           >
-            {fmtDist(selectedOption.totalBusDistanceM)} bus • {fmtDist(selectedOption.totalWalkDistanceM)} walk
+            {fmtDist(selectedOption.totalBusDistanceM)} bus • {fmtDist(selectedOption.totalWalkDistanceM)} {selectedOption.needsFeeder ? "feeder/walk" : "walk"}
           </span>
 
-          {selectedOption.isHighWalk && (
+          {(selectedOption.needsFeeder || selectedOption.isHighWalk) && (
             <span
               style={{
                 fontSize: 10,
-                background: isDark ? "#451a03" : "#fef3c7",
-                color: isDark ? "#fbbf24" : "#b45309",
+                background: selectedOption.needsFeeder
+                  ? isDark
+                    ? "#431407"
+                    : "#ffedd5"
+                  : isDark
+                  ? "#451a03"
+                  : "#fef3c7",
+                color: selectedOption.needsFeeder
+                  ? isDark
+                    ? "#fdba74"
+                    : "#c2410c"
+                  : isDark
+                  ? "#fbbf24"
+                  : "#b45309",
                 padding: "2px 6px",
                 borderRadius: 4,
                 fontWeight: 700,
               }}
             >
-              ⚠️ High Walk
+              {selectedOption.needsFeeder ? "🛺 Feeder" : "⚠️ High Walk"}
             </span>
           )}
 
@@ -679,18 +922,30 @@ export default function HomePage() {
                         }}
                       >
                         <span>Option {idx + 1}</span>
-                        {opt.isHighWalk && (
+                        {(opt.needsFeeder || opt.isHighWalk) && (
                           <span
                             style={{
                               fontSize: 9,
-                              background: isDark ? "#451a03" : "#fef3c7",
-                              color: isDark ? "#fbbf24" : "#b45309",
+                              background: opt.needsFeeder
+                                ? isDark
+                                  ? "#431407"
+                                  : "#ffedd5"
+                                : isDark
+                                ? "#451a03"
+                                : "#fef3c7",
+                              color: opt.needsFeeder
+                                ? isDark
+                                  ? "#fdba74"
+                                  : "#c2410c"
+                                : isDark
+                                ? "#fbbf24"
+                                : "#b45309",
                               padding: "1px 5px",
                               borderRadius: 4,
                               fontWeight: 700,
                             }}
                           >
-                            High Walk
+                            {opt.needsFeeder ? "🛺 Feeder" : "High Walk"}
                           </span>
                         )}
                       </div>
@@ -713,7 +968,7 @@ export default function HomePage() {
                           marginTop: 2,
                         }}
                       >
-                        {fmtDist(opt.totalWalkDistanceM)} walk
+                        {fmtDist(opt.totalWalkDistanceM)} {opt.needsFeeder ? "feeder/walk" : "walk"}
                       </div>
                     </button>
                   );
@@ -791,15 +1046,12 @@ export default function HomePage() {
                   </span>
                 </div>
 
-                {/* Step 1: Walk to first boarding stop with explicit stop name */}
+                {/* Step 1: First-mile leg (walk or feeder) with explicit stop name */}
                 <div style={{ padding: "6px 0", color: isDark ? "#cbd5e1" : "#334155" }}>
-                  🚶 Walk{" "}
-                  <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
-                    {fmtWalk(
-                      walkStartLeg?.distanceM ?? selectedOption.walkToStart.distanceM,
-                      walkStartLeg?.durationSec
-                    )}
-                  </strong>
+                  {renderAccessMode(
+                    walkStartLeg?.distanceM ?? selectedOption.walkToStart.distanceM,
+                    walkStartLeg?.durationSec
+                  )}
                   <div
                     style={{
                       fontSize: "12px",
@@ -906,15 +1158,12 @@ export default function HomePage() {
                   );
                 })}
 
-                {/* Step Last: Walk to destination with explicit ending stop */}
+                {/* Step Last: Last-mile leg (walk or feeder) with explicit ending stop */}
                 <div style={{ padding: "6px 0", color: isDark ? "#cbd5e1" : "#334155" }}>
-                  🚶 Walk{" "}
-                  <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
-                    {fmtWalk(
-                      walkEndLeg?.distanceM ?? selectedOption.walkFromEnd.distanceM,
-                      walkEndLeg?.durationSec
-                    )}
-                  </strong>{" "}
+                  {renderAccessMode(
+                    walkEndLeg?.distanceM ?? selectedOption.walkFromEnd.distanceM,
+                    walkEndLeg?.durationSec
+                  )}{" "}
                   from{" "}
                   <strong style={{ color: isDark ? "#f8fafc" : "#0f172a" }}>
                     {selectedOption.legs[selectedOption.legs.length - 1].alightStopName}
@@ -947,6 +1196,51 @@ export default function HomePage() {
                     </strong>
                   </span>
                 </div>
+
+                {/* Quick Step-1 Board / Exit CTA tied to active route */}
+                <button
+                  type="button"
+                  onClick={() => setTrackerOpen(true)}
+                  style={{
+                    marginTop: "10px",
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: activeBoarding ? "#059669" : "#2563eb",
+                    color: "white",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  {activeBoarding
+                    ? `🟢 Riding ${activeBoarding.routeId} — Tap When You Exit (+15 Coins)`
+                    : `🚌 Boarded ${selectedOption.legs[0].routeId}? Broadcast Live Location`}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  style={{
+                    marginTop: "6px",
+                    width: "100%",
+                    padding: "7px 10px",
+                    borderRadius: "8px",
+                    border: isDark ? "1px solid #334155" : "1px solid #cbd5e1",
+                    background: isDark ? "#0f172a" : "#ffffff",
+                    color: isDark ? "#cbd5e1" : "#334155",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  💬 Open #{selectedOption.legs[0].routeId}-chat Commuter Channel
+                </button>
               </div>
             );
           })()}

@@ -44,12 +44,15 @@ export interface TransitOption {
   score: number;
   /** Flagged if walking exceeds bus ride distance */
   isHighWalk?: boolean;
+  /** Flagged if either first-mile or last-mile gap is > 1.8km (Rickshaw / Chingchi feeder recommended) */
+  needsFeeder?: boolean;
 }
 
-const MAX_DIRECT_WALK_M = 3_000; // 3km maximum walk to direct route
-const MAX_ORIGIN_TRANSFER_SNAP_M = 2_500; // 2.5km maximum walk to start first bus
-const MAX_DEST_TRANSFER_SNAP_M = 2_500; // 2.5km maximum walk from last bus to destination
-const MAX_TRANSFER_WALK_M = 1_000; // 1km maximum walk between transfer stops
+const MAX_DIRECT_WALK_M = 4_500; // 4.5km maximum first/last-mile gap to direct route
+const MAX_ORIGIN_TRANSFER_SNAP_M = 4_500; // 4.5km maximum first-mile gap to start first bus
+const MAX_DEST_TRANSFER_SNAP_M = 4_500; // 4.5km maximum last-mile gap from last bus to destination
+const MAX_TRANSFER_WALK_M = 1_200; // 1.2km maximum walk between transfer stops
+const FEEDER_THRESHOLD_M = 1_800; // > 1.8km non-bus gap is treated as a Rickshaw/Feeder leg
 
 function calcBusDistance(coords: [number, number][]): number {
   let dist = 0;
@@ -127,6 +130,7 @@ export async function findRouteOptions(
 
     const totalWalk = startNode.distance + endNode.distance;
     const isHighWalk = totalWalk > rideDist;
+    const needsFeeder = startNode.distance > FEEDER_THRESHOLD_M || endNode.distance > FEEDER_THRESHOLD_M;
     const score = totalWalk * 3.0 + rideDist * 0.4 + (isHighWalk ? 2500 : 0);
 
     directOptions.push({
@@ -165,6 +169,7 @@ export async function findRouteOptions(
       totalBusDistanceM: rideDist,
       score,
       isHighWalk,
+      needsFeeder,
     });
   }
 
@@ -248,6 +253,9 @@ export async function findRouteOptions(
         const totalRide = ride1 + ride2;
 
         const isHighWalk = totalWalk > totalRide;
+        const needsFeeder =
+          orig.boardNode.distance > FEEDER_THRESHOLD_M ||
+          dest.alightNode.distance > FEEDER_THRESHOLD_M;
         const score = totalWalk * 3.0 + totalRide * 0.4 + 450 + (isHighWalk ? 2500 : 0);
 
         transferOptions.push({
@@ -307,6 +315,7 @@ export async function findRouteOptions(
           totalBusDistanceM: totalRide,
           score,
           isHighWalk,
+          needsFeeder,
         });
       }
     }
@@ -332,6 +341,15 @@ export async function findRouteOptions(
 
   // Take the top 5 overall options
   const combined: TransitOption[] = allCandidates.slice(0, 5);
+
+  // Guarantee the best single-bus direct option is also visible (if one exists and isn't already in top 5)
+  const hasDirect = combined.some((o) => o.type === "direct");
+  if (!hasDirect) {
+    const bestDirect = allCandidates.find((o) => o.type === "direct");
+    if (bestDirect) {
+      combined.push(bestDirect);
+    }
+  }
 
   // Resolve human-readable stop names for the selected options
   for (const opt of combined) {
